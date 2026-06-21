@@ -62,16 +62,18 @@ def test_upgrade_command_pip_pypi_url_and_editable():
 
 
 def test_upgrade_command_git_checkout_pull_then_reinstall():
-    plan = _plan("git-checkout", checkout=Path("/repo"), tool_note="2 new commit(s) available")
+    repo = Path("/repo")  # str(repo) renders per-OS (\repo on Windows) — match that, not a literal
+    plan = _plan("git-checkout", checkout=repo, tool_note="2 new commit(s) available")
     assert upgrade_command(plan) == [
-        ["git", "-C", "/repo", "pull", "--ff-only"],
-        ["python", "-m", "pip", "install", "-U", "/repo"],
+        ["git", "-C", str(repo), "pull", "--ff-only"],
+        ["python", "-m", "pip", "install", "-U", str(repo)],
     ]
 
 
 def test_upgrade_command_git_checkout_up_to_date_reinstalls_only():
-    plan = _plan("git-checkout", checkout=Path("/repo"), tool_note="checkout is up to date with its upstream")
-    assert upgrade_command(plan) == [["python", "-m", "pip", "install", "-U", "/repo"]]
+    repo = Path("/repo")
+    plan = _plan("git-checkout", checkout=repo, tool_note="checkout is up to date with its upstream")
+    assert upgrade_command(plan) == [["python", "-m", "pip", "install", "-U", str(repo)]]
 
 
 def test_build_plan_offline_with_injected_collaborators():
