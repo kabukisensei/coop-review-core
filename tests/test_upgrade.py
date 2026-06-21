@@ -1,16 +1,31 @@
 """Self-update logic (no network): classification + the per-install-method command shapes."""
 
+import subprocess
 from pathlib import Path
 
+from coop_review_core import upgrade as upmod
 from coop_review_core.upgrade import (
+    DependencyStatus,
     UpgradePlan,
+    apply_plan,
     build_plan,
     classify_update,
+    detect_install_method,
+    direct_dependencies,
     is_vcs_spec,
+    pip_install_origin,
     upgrade_command,
 )
 
 NAME = "coop-x-review"
+
+
+def _recording_runner(record):
+    def runner(cmd, **_kwargs):
+        record.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    return runner
 
 
 def _plan(method, *, checkout=None, pip_spec=None, tool_note="note") -> UpgradePlan:
@@ -88,3 +103,79 @@ def test_build_plan_offline_with_injected_collaborators():
     assert plan.package_name == NAME
     assert plan.tool_installed == "0.1.0"
     assert "latest release is 0.2.0" in plan.tool_note  # newer release detected
+
+
+# -- apply_plan (the executing path; tools print instead, but it's public core API) ----------
+
+
+def test_apply_plan_pipx_pypi_uses_upgrade():
+    record = []
+    apply_plan(_plan("pipx"), runner=_recording_runner(record))
+    assert record[0][:2] == ["pipx", "upgrade"]
+
+
+def test_apply_plan_pipx_vcs_uses_reinstall_not_force():
+    record = []
+    apply_plan(_plan("pipx", pip_spec="git+https://e/x.git@main"), runner=_recording_runner(record))
+    assert record[0][:2] == ["pipx", "reinstall"]
+
+
+def test_apply_plan_pip_url_force_reinstalls():
+    record = []
+    apply_plan(_plan("pip", pip_spec="git+https://e/x.git"), runner=_recording_runner(record))
+    assert "--force-reinstall" in record[0]
+
+
+def test_apply_plan_pip_safe_dependency_bump_pins_below_next_major():
+    record = []
+    plan = _plan("pip")
+    plan.dependencies.append(DependencyStatus("widget", "1.0.0", "1.2.0", "safe"))
+    apply_plan(plan, runner=_recording_runner(record))
+    # second command bumps the safe dep, pinned below its next major (1.x -> <2)
+    assert any("widget<2" in tok for tok in record[1])
+
+
+# -- install detection / origin (newly parameterized by package_name) ------------------------
+
+
+def test_pip_install_origin_parses_vcs(monkeypatch):
+    class _Dist:
+        def read_text(self, _name):
+            return '{"url":"https://e/x.git","vcs_info":{"vcs":"git","requested_revision":"main"}}'
+
+    monkeypatch.setattr(upmod.metadata, "distribution", lambda _n: _Dist())
+    assert pip_install_origin("pkg") == "git+https://e/x.git@main"
+
+
+def test_pip_install_origin_parses_editable(monkeypatch):
+    class _Dist:
+        def read_text(self, _name):
+            return '{"url":"file:///home/u/proj","dir_info":{"editable":true}}'
+
+    monkeypatch.setattr(upmod.metadata, "distribution", lambda _n: _Dist())
+    assert pip_install_origin("pkg") == "-e /home/u/proj"
+
+
+def test_pip_install_origin_none_for_plain_pypi(monkeypatch):
+    class _Dist:
+        def read_text(self, _name):
+            raise FileNotFoundError
+
+    monkeypatch.setattr(upmod.metadata, "distribution", lambda _n: _Dist())
+    assert pip_install_origin("pkg") is None
+
+
+def test_direct_dependencies_excludes_extras(monkeypatch):
+    monkeypatch.setattr(upmod.metadata, "requires", lambda _n: ["click>=8.1", "pytest>=8.0; extra == 'dev'"])
+    assert direct_dependencies("pkg") == ["click"]
+
+
+def test_detect_install_method_finds_git_checkout(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text('name = "mypkg"\n', encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    monkeypatch.setattr(upmod.sys, "prefix", str(venv))
+    method, checkout = detect_install_method("mypkg")
+    assert method == "git-checkout"
+    assert (checkout / "pyproject.toml").exists()
