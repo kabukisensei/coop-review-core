@@ -1,0 +1,40 @@
+# Python bytecode / packaging metadata
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts (PyPI hosts these; never commit them)
+build/
+dist/
+*.whl
+
+# Test / lint / type-checker caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Local Claude Code settings (per-user; a shared .claude/settings.json may be committed)
+.claude/settings.local.json

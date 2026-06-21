@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coop-review-core"
+dynamic = ["version"]   # single-sourced from src/coop_review_core/__init__.py (see [tool.hatch.version])
+description = "Shared infrastructure for the coop-*-review standards linters: progress, diagnostics, severity/fingerprint, inline + baseline suppressions, self-update, and the rules.yml config layer."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Aaron Jennings" }]
+keywords = ["linter", "standards", "shared", "library", "fabric", "powerbi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "PyYAML>=6.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/kabukisensei/coop-review-core"
+Repository = "https://github.com/kabukisensei/coop-review-core"
+Issues = "https://github.com/kabukisensei/coop-review-core/issues"
+
+[tool.hatch.version]
+path = "src/coop_review_core/__init__.py"   # the single source of truth for the version
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coop_review_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
