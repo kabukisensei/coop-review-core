@@ -46,6 +46,24 @@ def test_classify_update():
     assert classify_update("1.0.0", "2.0.0") == "major"
 
 
+def test_classify_update_prerelease_is_not_safe():
+    # A PEP 440 pre/dev suffix must not fold its digits into the release tuple
+    # and masquerade as a newer (safe) version — that would be a bogus
+    # downgrade-to-rc recommendation. Such a "latest" is the same release => current.
+    assert classify_update("1.0.0", "1.0.0rc1") != "safe"
+    assert classify_update("1.0.0", "1.0.0rc1") == "current"
+    assert classify_update("2.0.0", "2.0.0.dev3") != "safe"
+    assert classify_update("2.0.0", "2.0.0.dev3") == "current"
+
+
+def test_classify_update_numeric_ordering_preserved():
+    # Clean numeric versions still order correctly (1.10 > 1.9, not string-compared).
+    assert classify_update("1.9", "1.10") == "safe"
+    assert classify_update("1.10", "1.9") == "current"
+    assert classify_update("1.0.0", "1.0.1") == "safe"
+    assert classify_update("1.2.3", "1.2.3") == "current"
+
+
 def test_is_vcs_spec_by_scheme_not_substring():
     assert is_vcs_spec("git+https://example/x.git")
     assert not is_vcs_spec("/home/u/c++proj")

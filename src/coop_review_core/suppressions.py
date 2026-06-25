@@ -32,8 +32,14 @@ def _directive_re(tool: str) -> re.Pattern:
 
 def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
     """Map each 1-based line carrying a ``<tool>:ignore`` directive to the rule
-    ids it silences. A directive with no explicit rule id (or a bare ``*``)
-    silences every rule on its target line.
+    ids it silences.
+
+    Fail-closed: the blanket ``{"*"}`` wildcard (silence every rule on the
+    target line) fires ONLY for a truly bare directive — an empty/whitespace
+    tail or the literal ``*``. If the user wrote tokens but NONE parsed as a
+    rule-id shape (a typo'd / lowercase / un-hyphenated id like ``SQL001`` or
+    ``sql-no-select-star``), the line gets an empty id set so that NOTHING is
+    suppressed, rather than silently silencing everything.
     """
     pattern = _directive_re(tool)
     out: dict[int, set[str]] = {}
@@ -45,7 +51,12 @@ def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
         # token isn't captured as a rule id.
         head = re.split(r"\breason\b|--|//|#", match.group(1), maxsplit=1)[0]
         ids = set(_RULE_ID_RE.findall(head))
-        out[lineno] = ids or {"*"}
+        if ids:
+            out[lineno] = ids
+        elif head.strip() in ("", "*"):
+            out[lineno] = {"*"}  # truly bare directive (or literal *): suppress all
+        else:
+            out[lineno] = set()  # tokens written but none parsed -> suppress nothing
     return out
 
 

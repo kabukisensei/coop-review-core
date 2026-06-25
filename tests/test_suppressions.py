@@ -21,6 +21,17 @@ def test_scan_bare_is_wildcard():
     assert scan_directives("// coop-sql-review:ignore\n", TOOL) == {1: {"*"}}
 
 
+def test_scan_explicit_star_is_wildcard():
+    assert scan_directives("-- coop-sql-review:ignore *\n", TOOL) == {1: {"*"}}
+
+
+def test_scan_unparseable_id_does_not_become_wildcard():
+    # A directive that NAMES a rule but whose token doesn't parse (typo'd id,
+    # lowercase, no hyphen) must fail closed: suppress NOTHING, never everything.
+    assert scan_directives("-- coop-sql-review:ignore SQL001\n", TOOL) == {1: set()}
+    assert scan_directives("-- coop-sql-review:ignore sql-no-select-star\n", TOOL) == {1: set()}
+
+
 def test_scan_multiple_ids():
     assert scan_directives("-- coop-sql-review:ignore SQL-A, SQL-B\n", TOOL) == {1: {"SQL-A", "SQL-B"}}
 

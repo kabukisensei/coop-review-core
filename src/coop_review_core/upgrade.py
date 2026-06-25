@@ -79,7 +79,13 @@ class UpgradePlan:
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in re.findall(r"\d+", version)[:4])
+    # Parse ONLY the leading numeric release segment (e.g. "1.0.0" out of
+    # "1.0.0rc1"). Folding a PEP 440 pre/dev/post suffix's digits into the tuple
+    # would make a pre-release sort ABOVE its final release (rc1 -> (...,1)),
+    # wrongly classifying a downgrade-to-rc as a "safe" upgrade. stdlib `re` only
+    # (no `packaging` dependency).
+    match = re.match(r"\d+(?:\.\d+)*", version)
+    return tuple(int(part) for part in match.group(0).split("."))[:4] if match else ()
 
 
 def _major(version: str) -> int | None:
