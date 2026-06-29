@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from importlib import metadata
+from itertools import zip_longest
 from pathlib import Path
 
 PYPI_JSON_URL = "https://pypi.org/pypi/{name}/json"
@@ -57,6 +58,7 @@ class UpgradePlan:
     tool_note: str
     dependencies: list[DependencyStatus] = field(default_factory=list)
     pip_spec: str | None = None  # for "pip": the URL/VCS spec to reinstall from
+    needs_pull: bool = False  # git-checkout: upstream has commits to `git pull --ff-only`
 
     @property
     def safe_updates(self) -> list[DependencyStatus]:
@@ -85,7 +87,7 @@ def _version_tuple(version: str) -> tuple[int, ...]:
     # wrongly classifying a downgrade-to-rc as a "safe" upgrade. stdlib `re` only
     # (no `packaging` dependency).
     match = re.match(r"\d+(?:\.\d+)*", version)
-    return tuple(int(part) for part in match.group(0).split("."))[:4] if match else ()
+    return tuple(int(part) for part in match.group(0).split(".")) if match else ()
 
 
 def _major(version: str) -> int | None:
@@ -102,7 +104,13 @@ def classify_update(installed: str, latest: str | None) -> str:
         return "unknown"
     if latest_major > installed_major:
         return "major"
-    if latest_major == installed_major and _version_tuple(latest) > _version_tuple(installed):
+    # Right-pad the shorter release with zeros so trailing-zero-only differences
+    # (e.g. 1.2 vs 1.2.0) compare EQUAL per PEP 440, not as a spurious upgrade.
+    latest_release = _version_tuple(latest)
+    installed_release = _version_tuple(installed)
+    padded = list(zip_longest(latest_release, installed_release, fillvalue=0))
+    newer = tuple(a for a, _ in padded) > tuple(b for _, b in padded)
+    if latest_major == installed_major and newer:
         return "safe"
     return "current"
 
@@ -205,7 +213,13 @@ def _run(command: list[str], runner=subprocess.run) -> subprocess.CompletedProce
 # -- planning & applying -------------------------------------------------------
 
 
-def _git_checkout_note(checkout: Path, runner=subprocess.run) -> str:
+def _git_checkout_note(checkout: Path, runner=subprocess.run) -> tuple[str, bool]:
+    """Return (display note, needs_pull) for a git-checkout install.
+
+    ``needs_pull`` is the structured control signal consumed by
+    :func:`upgrade_command` / :func:`apply_plan`; the note is display-only, so
+    rewording it can't silently disable the pull step.
+    """
     has_upstream = (
         runner(
             ["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "@{upstream}"],
@@ -217,11 +231,12 @@ def _git_checkout_note(checkout: Path, runner=subprocess.run) -> str:
     if not has_upstream:
         return (
             "running from a git checkout with no upstream remote — upgrading "
-            "reinstalls from the local working tree"
+            "reinstalls from the local working tree",
+            False,
         )
     fetched = runner(["git", "-C", str(checkout), "fetch", "--quiet"], capture_output=True, text=True)
     if fetched.returncode != 0:
-        return "running from a git checkout; `git fetch` failed (offline?)"
+        return "running from a git checkout; `git fetch` failed (offline?)", False
     behind = runner(
         ["git", "-C", str(checkout), "rev-list", "--count", "HEAD..@{upstream}"],
         capture_output=True,
@@ -229,8 +244,8 @@ def _git_checkout_note(checkout: Path, runner=subprocess.run) -> str:
     )
     count = (behind.stdout or "").strip()
     if behind.returncode == 0 and count.isdigit() and int(count) > 0:
-        return f"{count} new commit(s) available on the upstream branch"
-    return "checkout is up to date with its upstream"
+        return f"{count} new commit(s) available on the upstream branch", True
+    return "checkout is up to date with its upstream", False
 
 
 def build_plan(
@@ -247,9 +262,10 @@ def build_plan(
     """
     method, checkout = detect_install_method(package_name)
     pip_spec = origin(package_name) if method in ("pip", "pipx", "uv-tool") else None
+    needs_pull = False
 
     if method == "git-checkout" and checkout is not None:
-        tool_note = _git_checkout_note(checkout, runner)
+        tool_note, needs_pull = _git_checkout_note(checkout, runner)
     elif is_vcs_spec(pip_spec):
         tool_note = f"installed from {pip_spec}; upgrading re-pulls the latest commit"
     else:
@@ -271,6 +287,7 @@ def build_plan(
         tool_installed=current_version,
         tool_note=tool_note,
         pip_spec=pip_spec,
+        needs_pull=needs_pull,
     )
 
     for name in direct_dependencies(package_name):
@@ -312,7 +329,7 @@ def upgrade_command(plan: UpgradePlan) -> list[list[str]]:
         commands: list[list[str]] = []
         # Only pull when there's something to pull: a checkout with no upstream
         # (or already up to date) would make `git pull --ff-only` error / no-op.
-        if "new commit(s)" in plan.tool_note:
+        if plan.needs_pull:
             commands.append(["git", "-C", str(plan.checkout), "pull", "--ff-only"])
         # Always reinstall from the checkout: for a NON-editable clone `git pull`
         # updates the source tree but not the installed package.
@@ -345,7 +362,7 @@ def apply_plan(plan: UpgradePlan, runner=subprocess.run) -> list[list[str]]:
             else ["uv", "tool", "upgrade", name]
         )
     elif plan.install_method == "git-checkout" and plan.checkout is not None:
-        if "new commit(s)" in plan.tool_note:
+        if plan.needs_pull:
             pull = ["git", "-C", str(plan.checkout), "pull", "--ff-only"]
             _run(pull, runner)
             executed.append(pull)

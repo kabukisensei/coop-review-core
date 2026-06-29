@@ -13,4 +13,4 @@ tool name, and standards file:
 Each linter keeps its own parsers, rules, Finding/Result model, and standards.md.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"

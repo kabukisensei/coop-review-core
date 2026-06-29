@@ -27,7 +27,9 @@ _RULE_ID_RE = re.compile(r"[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+")
 @lru_cache(maxsize=None)
 def _directive_re(tool: str) -> re.Pattern:
     # `<tool>:ignore` followed by optional rule ids, up to a reason/comment delimiter.
-    return re.compile(rf"{re.escape(tool)}\s*:\s*ignore\b([^\n]*)", re.IGNORECASE)
+    # `(?<![\w-])` keeps the tool token from matching as the suffix of a longer
+    # identifier (e.g. `xcoop-sql-review` must not match `coop-sql-review`).
+    return re.compile(rf"(?<![\w-]){re.escape(tool)}\s*:\s*ignore\b([^\n]*)", re.IGNORECASE)
 
 
 def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
@@ -49,11 +51,12 @@ def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
             continue
         # Stop at a reason/comment delimiter so a reason mentioning a RULE-LIKE
         # token isn't captured as a rule id.
-        head = re.split(r"\breason\b|--|//|#", match.group(1), maxsplit=1)[0]
+        raw = match.group(1)
+        head = re.split(r"\breason\b|--|//|#", raw, maxsplit=1)[0]
         ids = set(_RULE_ID_RE.findall(head))
         if ids:
             out[lineno] = ids
-        elif head.strip() in ("", "*"):
+        elif raw.strip() in ("", "*"):
             out[lineno] = {"*"}  # truly bare directive (or literal *): suppress all
         else:
             out[lineno] = set()  # tokens written but none parsed -> suppress nothing

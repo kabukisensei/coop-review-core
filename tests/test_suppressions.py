@@ -32,6 +32,20 @@ def test_scan_unparseable_id_does_not_become_wildcard():
     assert scan_directives("-- coop-sql-review:ignore sql-no-select-star\n", TOOL) == {1: set()}
 
 
+def test_scan_reason_only_no_id_suppresses_nothing():
+    # A directive carrying only a reason/comment but NO rule id must fail closed:
+    # suppress nothing, never fall into the bare-wildcard branch.
+    assert scan_directives("-- coop-sql-review:ignore reason: legacy\n", TOOL) == {1: set()}
+    assert scan_directives("-- coop-sql-review:ignore -- just because\n", TOOL) == {1: set()}
+    assert scan_directives("-- coop-sql-review:ignore # note\n", TOOL) == {1: set()}
+
+
+def test_scan_tool_name_suffix_does_not_match():
+    # A directive for a differently-named tool whose token merely ENDS with this
+    # tool's name must not suppress this tool's findings (no fail-open).
+    assert scan_directives("-- xcoop-sql-review:ignore SQL-FOO\n", TOOL) == {}
+
+
 def test_scan_multiple_ids():
     assert scan_directives("-- coop-sql-review:ignore SQL-A, SQL-B\n", TOOL) == {1: {"SQL-A", "SQL-B"}}
 

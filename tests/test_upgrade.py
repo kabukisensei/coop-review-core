@@ -28,7 +28,7 @@ def _recording_runner(record):
     return runner
 
 
-def _plan(method, *, checkout=None, pip_spec=None, tool_note="note") -> UpgradePlan:
+def _plan(method, *, checkout=None, pip_spec=None, tool_note="note", needs_pull=False) -> UpgradePlan:
     return UpgradePlan(
         package_name=NAME,
         install_method=method,
@@ -36,6 +36,7 @@ def _plan(method, *, checkout=None, pip_spec=None, tool_note="note") -> UpgradeP
         tool_installed="0.1.0",
         tool_note=tool_note,
         pip_spec=pip_spec,
+        needs_pull=needs_pull,
     )
 
 
@@ -62,6 +63,20 @@ def test_classify_update_numeric_ordering_preserved():
     assert classify_update("1.10", "1.9") == "current"
     assert classify_update("1.0.0", "1.0.1") == "safe"
     assert classify_update("1.2.3", "1.2.3") == "current"
+
+
+def test_classify_update_trailing_zero_difference_is_current():
+    # Per PEP 440, trailing-zero-only differences are the SAME version, not an
+    # upgrade — release tuples are length-normalized before comparison.
+    assert classify_update("1.2", "1.2.0") == "current"
+    assert classify_update("1.2.0", "1.2") == "current"
+    assert classify_update("1", "1.0.0") == "current"
+
+
+def test_classify_update_fifth_segment_difference_is_detected():
+    # Release segments beyond the 4th are no longer truncated, so a version that
+    # differs only in a 5th segment is a real (safe) update, not "current".
+    assert classify_update("1.2.3.4.0", "1.2.3.4.9") == "safe"
 
 
 def test_is_vcs_spec_by_scheme_not_substring():
@@ -96,7 +111,7 @@ def test_upgrade_command_pip_pypi_url_and_editable():
 
 def test_upgrade_command_git_checkout_pull_then_reinstall():
     repo = Path("/repo")  # str(repo) renders per-OS (\repo on Windows) — match that, not a literal
-    plan = _plan("git-checkout", checkout=repo, tool_note="2 new commit(s) available")
+    plan = _plan("git-checkout", checkout=repo, tool_note="2 new commit(s) available", needs_pull=True)
     assert upgrade_command(plan) == [
         ["git", "-C", str(repo), "pull", "--ff-only"],
         ["python", "-m", "pip", "install", "-U", str(repo)],
@@ -107,6 +122,20 @@ def test_upgrade_command_git_checkout_up_to_date_reinstalls_only():
     repo = Path("/repo")
     plan = _plan("git-checkout", checkout=repo, tool_note="checkout is up to date with its upstream")
     assert upgrade_command(plan) == [["python", "-m", "pip", "install", "-U", str(repo)]]
+
+
+def test_upgrade_command_pull_is_driven_by_needs_pull_not_note_wording():
+    # The pull step is gated on the structured `needs_pull` flag, not the display
+    # note: a reworded note still pulls when needs_pull is set, and a note that
+    # happens to contain "new commit(s)" does NOT pull when needs_pull is False.
+    repo = Path("/repo")
+    reworded = _plan("git-checkout", checkout=repo, tool_note="upstream is ahead", needs_pull=True)
+    assert upgrade_command(reworded) == [
+        ["git", "-C", str(repo), "pull", "--ff-only"],
+        ["python", "-m", "pip", "install", "-U", str(repo)],
+    ]
+    stale_note = _plan("git-checkout", checkout=repo, tool_note="2 new commit(s) available", needs_pull=False)
+    assert upgrade_command(stale_note) == [["python", "-m", "pip", "install", "-U", str(repo)]]
 
 
 def test_build_plan_offline_with_injected_collaborators():
