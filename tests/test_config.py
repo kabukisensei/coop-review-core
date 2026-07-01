@@ -69,6 +69,33 @@ def test_unknown_rule_ids():
     assert RuleConfig(configured={"REAL", "TYPO"}).unknown_rule_ids({"REAL"}) == ["TYPO"]
 
 
+def test_load_parses_ignore_section(tmp_path):
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text(
+        "rules:\n  A:\n    enabled: false\n"
+        "ignore:\n"
+        "  - fingerprint: abc123\n    rule: X\n    where: a.sql:3\n    note: legacy\n"
+        "  - deadbeef\n",  # a bare string is treated as a fingerprint
+        encoding="utf-8",
+    )
+    config = RuleConfig.load(cfg)
+    assert config.disabled == {"A"}  # rules: still parsed alongside ignore:
+    assert config.ignored_fingerprints == {"abc123", "deadbeef"}
+
+
+def test_ignore_entry_without_fingerprint_is_skipped(tmp_path):
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text("ignore:\n  - note: no fingerprint here\n  - fingerprint: keep1\n", encoding="utf-8")
+    # A malformed entry silences nothing (never everything) rather than crashing.
+    assert RuleConfig.load(cfg).ignored_fingerprints == {"keep1"}
+
+
+def test_empty_ignore_when_absent(tmp_path):
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text("rules:\n  A:\n    enabled: false\n", encoding="utf-8")
+    assert RuleConfig.load(cfg).ignored_fingerprints == set()
+
+
 def test_empty_config_when_absent(tmp_path):
     assert RuleConfig.load(None) == RuleConfig()
     assert RuleConfig.load(tmp_path / "nope.yml") == RuleConfig()

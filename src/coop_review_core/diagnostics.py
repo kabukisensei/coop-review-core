@@ -25,6 +25,7 @@ PARSE_DEGRADED = "parse_degraded"
 FILE_UNREADABLE = "file_unreadable"
 CONFIG_UNKNOWN_RULE = "config_unknown_rule"  # rules.yml names a rule id that doesn't exist
 BASELINE_STALE = "baseline_stale"  # a baseline entry no longer matches any current finding
+IGNORE_STALE = "ignore_stale"  # a rules.yml `ignore:` entry no longer matches any current finding
 
 
 @dataclass(frozen=True)

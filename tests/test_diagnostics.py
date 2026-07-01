@@ -3,6 +3,7 @@
 from coop_review_core.diagnostics import (
     BASELINE_STALE,
     CONFIG_UNKNOWN_RULE,
+    IGNORE_STALE,
     PARSE_FAILED,
     Diagnostic,
 )
@@ -26,3 +27,4 @@ def test_category_constants_exist():
     assert PARSE_FAILED == "parse_failed"
     assert CONFIG_UNKNOWN_RULE == "config_unknown_rule"
     assert BASELINE_STALE == "baseline_stale"
+    assert IGNORE_STALE == "ignore_stale"
