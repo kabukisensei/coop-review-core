@@ -4,10 +4,11 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# Virtual environments
+# Virtual environments (test_env/ is the ephemeral scratch venv — see AGENTS.md)
 .venv/
 venv/
 env/
+test_env/
 
 # Build artifacts (PyPI hosts these; never commit them)
 build/

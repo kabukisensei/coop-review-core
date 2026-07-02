@@ -42,11 +42,29 @@ plan = build_plan("coop-sql-review", __version__)                  # tool passes
 ## Develop
 
 ```sh
-python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q
-.venv/bin/ruff check . && .venv/bin/ruff format --check .
+make setup   # python -m venv .venv && pip install -e ".[dev]"
+make test    # .venv/bin/pytest -q
+make lint    # .venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```
 
+(No `make`? Each target is a one-liner — see the `Makefile`.)
+
+### Testing core changes against the linters
+
+The consumer repos (`coop-sql-review`, `coop-dax-review`) hold a **non-editable installed copy**
+of core in their `.venv`s, so an edit here is invisible to them until core is re-published and
+reinstalled. To run a consumer's tests (or CLI) against your local, unpublished core, shadow its
+installed copy — from the consumer repo:
+
+```sh
+PYTHONPATH="$HOME/Developer/coop-review-core/src:$PWD/src" .venv/bin/python -m pytest -q
+```
+
+`PYTHONPATH` beats `site-packages`, so the first entry shadows the installed core with this repo's
+`src`; `$PWD/src` keeps the consumer's own package importable next to it. Confirm the shadow took
+with `... -c "import coop_review_core; print(coop_review_core.__file__)"` — it must print a path
+under this repo, not the consumer's `site-packages`.
+
 Release = bump `__version__` in `src/coop_review_core/__init__.py` (the single source — `pyproject`
-derives it), then tag `vX.Y.Z`; `publish.yml` builds, publishes to PyPI via trusted publishing, and
-cuts a GitHub Release.
+derives it), run `make release-check`, then tag `vX.Y.Z`; `publish.yml` refuses a tag that doesn't
+match `__version__`, builds, publishes to PyPI via trusted publishing, and cuts a GitHub Release.
