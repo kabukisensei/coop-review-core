@@ -23,6 +23,20 @@ Hard properties to preserve:
   `>=3.10` — write 3.10-compatible syntax even though local venvs run newer
   interpreters (ruff enforces `target-version = "py310"`).
 
+## Environment
+
+- Everything here runs fully headless on Linux (and macOS/Windows) — no GUI, no OS-specific
+  tools, no network except `upgrade.py`'s own code paths.
+- Python: create the venv with **Python 3.13** (any of 3.10–3.13 works; **3.14 breaks editable
+  installs** — its venvs don't process the `.pth`, so imports fail). `make setup` uses whatever
+  `python3` resolves to; if `python3 --version` prints 3.14+, rebuild the venv explicitly:
+  `rm -rf .venv && python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"`.
+- Before starting any work: `git fetch && git pull --ff-only`. If the pull fails, or
+  `git status --porcelain` prints changes you didn't make yourself, **stop and report** — never
+  stash, reset, or commit around them (another agent or human may share this tree).
+- Secrets: **none in this repo and none needed** — publishing uses GitHub OIDC trusted
+  publishing (no PyPI token exists anywhere), and the library itself is offline.
+
 ## Layout
 
 | Path | What it is |
@@ -101,7 +115,8 @@ make setup
 
 Expected: pip install succeeds; the last line prints `coop-review-core <version>`.
 Verify: `.venv/bin/python -m pip show coop-review-core | grep Editable` prints
-`Editable project location: <this repo>`.
+`Editable project location: <this repo>`. If the final import fails instead,
+`python3` is probably 3.14+ — rebuild the venv with 3.13 (see Environment).
 
 ### Test and lint (run after every change)
 
@@ -131,7 +146,10 @@ where `<version>` equals `__version__`.
 
 ### Test the linters against local core edits (PYTHONPATH shadow)
 
-The consumer venvs (`~/Developer/coop-sql-review`, `~/Developer/coop-dax-review`)
+The coop-* repos are assumed cloned **side by side under one parent directory**
+(on Aaron's Mac: `~/Developer`) — every `$HOME/Developer` below means that
+parent; substitute yours if it differs. The consumer venvs (the
+`coop-sql-review` / `coop-dax-review` checkouts next to this repo)
 hold a **non-editable installed copy** of the last released core, so local edits
 here are invisible to them until core is re-published and reinstalled. To run a
 consumer's tests or CLI against your local, unpublished core — from the
@@ -184,6 +202,10 @@ Release steps, in order:
    (`.venv/bin/python -m pip install -U coop-review-core`), then release the
    tools — their pyprojects pin `coop-review-core>=<version>`, so the order
    across the suite is always core first.
+7. Suite definition-of-done: when this is part of a suite release, the release
+   is **not done** until the `coop-website` repo is synced + pushed —
+   `versions.json` updated first, then both of its check scripts print `PASS`
+   (exact procedure: coop-website's `AGENTS.md`, "Release-time procedure").
 
 TODO(aaron): confirm whether the `coop release` helper in coop-agent should
 drive this repo's releases too.
@@ -191,7 +213,11 @@ drive this repo's releases too.
 ## Never do
 
 - Never create or push a `v*` tag unless explicitly instructed — the tag push
-  publishes to PyPI immediately.
+  publishes to PyPI immediately. "Explicitly instructed" means Aaron asked for
+  a release **naming the version, in the current conversation**. Never infer a
+  release from a clean working tree, a version bump you notice, or green CI —
+  a real incident (2026-07-02): an agent cut a spurious empty release off a
+  "clean tree" signal while another agent shared the same tree.
 - Never move, delete, or reuse an existing `v*` tag; PyPI refuses re-uploads of
   a version. A botched release means a new patch version.
 - Never bump the version anywhere except `src/coop_review_core/__init__.py`.

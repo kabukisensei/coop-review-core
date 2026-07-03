@@ -42,16 +42,20 @@ plan = build_plan("coop-sql-review", __version__)                  # tool passes
 ## Develop
 
 ```sh
-make setup   # python -m venv .venv && pip install -e ".[dev]"
+make setup   # python3 -m venv .venv && pip install -e ".[dev]"
 make test    # .venv/bin/pytest -q
 make lint    # .venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```
 
-(No `make`? Each target is a one-liner — see the `Makefile`.)
+(No `make`? Each target is a one-liner — see the `Makefile`.) Use Python 3.10–3.13 for the venv
+— 3.14 doesn't process the editable install's `.pth`. If `python3` is 3.14+, create the venv
+explicitly: `python3.13 -m venv .venv`.
 
 ### Testing core changes against the linters
 
-The consumer repos (`coop-sql-review`, `coop-dax-review`) hold a **non-editable installed copy**
+The consumer repos (`coop-sql-review`, `coop-dax-review`, assumed cloned side by side with this
+one under a single parent directory — substitute your parent for `$HOME/Developer` below) hold a
+**non-editable installed copy**
 of core in their `.venv`s, so an edit here is invisible to them until core is re-published and
 reinstalled. To run a consumer's tests (or CLI) against your local, unpublished core, shadow its
 installed copy — from the consumer repo:
@@ -68,3 +72,5 @@ under this repo, not the consumer's `site-packages`.
 Release = bump `__version__` in `src/coop_review_core/__init__.py` (the single source — `pyproject`
 derives it), run `make release-check`, then tag `vX.Y.Z`; `publish.yml` refuses a tag that doesn't
 match `__version__`, builds, publishes to PyPI via trusted publishing, and cuts a GitHub Release.
+The tag push **is** the publish — releases happen only on an explicit request naming the version
+(agents: see `AGENTS.md`, "Version + release discipline").
