@@ -143,3 +143,56 @@ def test_add_ignores_keeps_a_trailing_top_level_section(tmp_path):
     config = RuleConfig.load(cfg)
     assert config.ignored_fingerprints == {"old1", "new1"}
     assert config.disabled == {"SQL-Z"}  # the trailing rules: block survived
+
+
+def test_add_ignores_preserves_a_top_level_comment_after_the_block(tmp_path):
+    # issue #2: a column-0 comment right after the ignore block is a user note and
+    # must survive a rewrite (it used to be consumed by the block end-scan).
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text(
+        "rules:\n  X-A-B:\n    enabled: false\n\n"
+        "ignore:\n  - fingerprint: aaa\n"
+        "# reviewed by team 2026-07\n\n"
+        "other: true\n",
+        encoding="utf-8",
+    )
+    add_ignores(cfg, [{"fingerprint": "bbb", "rule": "X-A-B"}])
+    out = cfg.read_text(encoding="utf-8")
+    assert "# reviewed by team 2026-07" in out
+    assert "other: true" in out
+    assert "bbb" in out
+    # still valid YAML with both fingerprints
+    data = yaml.safe_load(out)
+    assert {e["fingerprint"] for e in data["ignore"]} == {"aaa", "bbb"}
+    assert data["other"] is True
+
+
+def test_add_ignores_preserves_a_trailing_eof_comment_after_the_block(tmp_path):
+    # issue #2: the same end-scan also ate an EOF comment when ignore: was last.
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text(
+        "ignore:\n  - fingerprint: aaa\n# end-of-file note\n",
+        encoding="utf-8",
+    )
+    add_ignores(cfg, [{"fingerprint": "bbb"}])
+    out = cfg.read_text(encoding="utf-8")
+    assert "# end-of-file note" in out
+    assert yaml.safe_load(out)["ignore"] and {e["fingerprint"] for e in yaml.safe_load(out)["ignore"]} == {
+        "aaa",
+        "bbb",
+    }
+
+
+def test_add_ignores_drops_an_indented_comment_inside_the_block(tmp_path):
+    # documented behavior: a comment INDENTED with the entries is owned by the
+    # writer and rewritten away (only top-level comments are preserved).
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text(
+        "ignore:\n  - fingerprint: aaa\n  # inner note about aaa\n\nother: true\n",
+        encoding="utf-8",
+    )
+    add_ignores(cfg, [{"fingerprint": "bbb"}])
+    out = cfg.read_text(encoding="utf-8")
+    assert "# inner note about aaa" not in out  # intentionally dropped
+    assert "other: true" in out  # the top-level key is still preserved
+    assert {e["fingerprint"] for e in yaml.safe_load(out)["ignore"]} == {"aaa", "bbb"}

@@ -119,3 +119,62 @@ def test_standards_info_and_default_config_path(tmp_path):
     assert info["sha256"] == hashlib.sha256(b"hello").hexdigest()
     assert info["path"].endswith("s.md")
     assert default_config_path(p) == tmp_path / "rules.yml"
+
+
+# -- issue #4: core owns the friendly rules.yml loader ------------------------
+
+
+def test_rule_config_loads_from_text():
+    from coop_review_core.config import RuleConfig
+
+    cfg = RuleConfig.loads("rules:\n  A-B:\n    enabled: false\n  C-D:\n    enabled: true\n")
+    assert cfg.disabled == {"A-B"} and cfg.enabled == {"C-D"}
+    assert RuleConfig.loads("") == RuleConfig()  # empty text -> empty config
+    assert RuleConfig.loads("   \n") == RuleConfig()
+
+
+def test_load_config_friendly_returns_config_and_raw_mapping(tmp_path):
+    from coop_review_core.config import load_config_friendly
+
+    p = tmp_path / "rules.yml"
+    p.write_text("rules:\n  A-B:\n    severity: warning\nsyntax_errors: off\n", encoding="utf-8")
+    cfg, raw = load_config_friendly(p)
+    assert cfg.severity_overrides == {"A-B": "warning"}
+    # the raw top-level mapping is returned so a tool checks its own knob WITHOUT re-reading
+    assert raw.get("syntax_errors") is False  # YAML 1.1 coerces bare `off` -> False
+
+
+def test_load_config_friendly_absent_is_empty(tmp_path):
+    from coop_review_core.config import RuleConfig, load_config_friendly
+
+    cfg, raw = load_config_friendly(tmp_path / "nope.yml")
+    assert cfg == RuleConfig() and raw == {}
+
+
+def test_load_config_friendly_reports_each_problem(tmp_path):
+    from coop_review_core.config import load_config_friendly
+
+    def _bad(text, match, *, raw=False):
+        p = tmp_path / "rules.yml"
+        (p.write_bytes(text) if raw else p.write_text(text, encoding="utf-8"))
+        with pytest.raises(StandardsError, match=match):
+            load_config_friendly(p)
+
+    _bad("[]", "top level must be a mapping")
+    _bad("rules: []", r"`rules:` must be a mapping")
+    _bad("a: b: c\n- x", "invalid YAML")
+    _bad("rules:\n  A-B:\n    severity: loud\n", "invalid severity")
+    _bad(b"\xff\xfer\x00u\x00", "not UTF-8", raw=True)  # UTF-16-ish / NUL-riddled
+
+
+def test_parse_syntax_errors_knob():
+    from coop_review_core.config import parse_syntax_errors_knob
+
+    assert parse_syntax_errors_knob("error") == "error"
+    assert parse_syntax_errors_knob("Warning") == "warning"  # case-insensitive
+    assert parse_syntax_errors_knob(False) == "off"  # YAML 1.1 bare `off`
+    assert parse_syntax_errors_knob("off") == "off"
+    with pytest.raises(StandardsError, match="must be one of"):
+        parse_syntax_errors_knob(True)  # truthy `on` has no mode
+    with pytest.raises(StandardsError, match="must be one of"):
+        parse_syntax_errors_knob("nope")

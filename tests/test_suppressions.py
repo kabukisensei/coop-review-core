@@ -2,7 +2,10 @@
 
 import json
 
+import pytest
+
 from coop_review_core.suppressions import (
+    BaselineError,
     is_inline_suppressed,
     load_baseline,
     scan_directives,
@@ -76,8 +79,79 @@ def test_baseline_roundtrip(tmp_path):
     assert payload["tool"] == TOOL and payload["fingerprints"] == ["aaa", "zzz"]  # sorted
 
 
-def test_load_missing_or_malformed_is_empty(tmp_path):
-    assert load_baseline(tmp_path / "nope.json") == set()
+def test_load_missing_or_malformed_raises_baseline_error(tmp_path):
+    # issue #3: an unusable baseline is a loud error, not a silent empty set
+    # (which would flood every baselined finding back with no explanation).
+    with pytest.raises(BaselineError, match="not found"):
+        load_baseline(tmp_path / "nope.json")
+
     bad = tmp_path / "bad.json"
-    bad.write_text("not json", encoding="utf-8")
-    assert load_baseline(bad) == set()
+    bad.write_text("{not json", encoding="utf-8")
+    with pytest.raises(BaselineError, match="not valid JSON"):
+        load_baseline(bad)
+
+    wrong_shape = tmp_path / "wrong.json"
+    wrong_shape.write_text("42", encoding="utf-8")  # valid JSON, wrong type
+    with pytest.raises(BaselineError, match="unexpected shape"):
+        load_baseline(wrong_shape)
+
+
+def test_load_baseline_bare_list_and_toolless_dict_still_load(tmp_path):
+    # the lenient shape handling is unchanged: a bare list or a dict without a
+    # `tool` field loads fine (only genuinely-broken input raises).
+    bare = tmp_path / "bare.json"
+    bare.write_text(json.dumps(["aaa", "bbb"]), encoding="utf-8")
+    assert load_baseline(bare, tool=TOOL) == {"aaa", "bbb"}
+    toolless = tmp_path / "toolless.json"
+    toolless.write_text(json.dumps({"fingerprints": ["ccc"]}), encoding="utf-8")
+    assert load_baseline(toolless, tool=TOOL) == {"ccc"}
+
+
+def test_load_baseline_rejects_a_different_tools_baseline(tmp_path):
+    # issue #3: a coop-sql-review baseline handed to coop-dax-review is a
+    # misconfiguration, not an empty baseline — surfaced only when `tool` is given.
+    path = tmp_path / "bl.json"
+    write_baseline(path, ["aaa"], "coop-sql-review")
+    assert load_baseline(path) == {"aaa"}  # no tool arg -> no check (back-compat)
+    assert load_baseline(path, tool="coop-sql-review") == {"aaa"}  # match -> fine
+    with pytest.raises(BaselineError, match="written by"):
+        load_baseline(path, tool="coop-dax-review")
+
+
+@pytest.mark.parametrize("tool", ["coop-sql-review", "coop-dax-review"])
+def test_scan_syntax_ignores_fires_and_non_fires(tool):
+    from coop_review_core.suppressions import scan_directives, scan_syntax_ignores
+
+    text = "\n".join(
+        [
+            f"a  -- {tool}:ignore syntax",  # 1: explicit token
+            f"b  -- {tool}:ignore",  # 2: bare -> wildcard
+            f"c  -- {tool}:ignore *",  # 3: literal *
+            f"d  -- {tool}:ignore SQL-NO-SELECT-STAR",  # 4: rule id only -> NOT a syntax ignore
+            f"e  -- {tool}:ignore syntax reason: known bad vendor DDL",  # 5: token + reason tail
+            "f  -- nothing here",  # 6: no directive
+        ]
+    )
+    assert scan_syntax_ignores(text, tool) == {1, 2, 3, 5}
+    # a rule-ids-only directive still silences that RULE, but NOT a syntax diagnostic —
+    # the two channels stay separate (fail-closed: `syntax` never parses as a rule id).
+    assert scan_directives(text, tool).get(4) == {"SQL-NO-SELECT-STAR"}
+
+
+def test_is_syntax_ignored_line_and_line_above():
+    from coop_review_core.suppressions import is_syntax_ignored
+
+    lines = {5}
+    assert is_syntax_ignored(5, lines) is True  # same line
+    assert is_syntax_ignored(6, lines) is True  # line directly below the directive
+    assert is_syntax_ignored(4, lines) is False
+    assert is_syntax_ignored(0, lines) is False  # whole-file diagnostic never inline-targeted
+
+
+def test_syntax_token_never_parses_as_a_rule_id_in_scan_directives():
+    from coop_review_core.suppressions import scan_directives
+
+    # deliberate separation: `syntax` is lowercase/un-hyphenated so it can't match the
+    # rule-id shape — a bare-looking directive of only `syntax` suppresses no RULE.
+    d = scan_directives("x  -- coop-sql-review:ignore syntax", "coop-sql-review")
+    assert d.get(1) == set()  # tokens present but none is a rule id -> suppress nothing

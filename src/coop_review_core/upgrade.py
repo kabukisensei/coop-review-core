@@ -345,8 +345,15 @@ def apply_plan(plan: UpgradePlan, runner=subprocess.run) -> list[list[str]]:
     """Run the upgrade: the tool first, then non-breaking dependency bumps.
 
     Major dependency upgrades are never applied automatically — they are
-    reported so a human can review release notes first. (Linters that follow the
-    "print, don't self-apply" policy use :func:`upgrade_command` instead.)
+    reported so a human can review release notes first.
+
+    .. deprecated::
+        No shipping linter self-applies anymore — both coop-sql-review and
+        coop-dax-review only *print* the command from :func:`upgrade_command` and
+        let the user run it (a running program can't reliably replace its own
+        files, esp. a locked ``.exe`` on Windows). ``apply_plan`` is retained as
+        tested library API for any out-of-tree caller, but new code should prefer
+        :func:`upgrade_command`. It may be removed in a future major release.
     """
     name = plan.package_name
     executed: list[list[str]] = []

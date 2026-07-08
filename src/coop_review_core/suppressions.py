@@ -74,6 +74,39 @@ def is_inline_suppressed(rule_id: str, line: int, directives: dict[int, set[str]
     return False
 
 
+def scan_syntax_ignores(text: str, tool: str) -> set[int]:
+    """1-based lines whose ``<tool>:ignore`` directive silences a *syntax* diagnostic.
+
+    A syntax diagnostic (a real syntax error a tool detects) isn't a rule, so
+    :func:`scan_directives`' rule-id matcher deliberately can't represent it. This
+    fires for an explicit lowercase ``syntax`` token (``<tool>:ignore syntax``) or
+    a bare / ``*`` wildcard directive (which already silences everything on the
+    line); a directive naming only rule ids does NOT silence a syntax diagnostic.
+    It shares the one cached :func:`_directive_re` and strips the ``reason:`` /
+    comment tail identically to :func:`scan_directives`, so the whole family has a
+    single directive grammar.
+    """
+    pattern = _directive_re(tool)
+    out: set[int] = set()
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        match = pattern.search(line)
+        if not match:
+            continue
+        tail = re.split(r"\breason\b|--|//|#", match.group(1), maxsplit=1)[0]
+        tokens = tail.split()
+        if not tokens or tail.strip() == "*" or any(token.lower() == "syntax" for token in tokens):
+            out.add(lineno)
+    return out
+
+
+def is_syntax_ignored(line: int, directive_lines: set[int]) -> bool:
+    """True if a syntax-ignore directive sits on this line or the line directly
+    above (line 0 — a whole-file diagnostic — is never inline-targeted)."""
+    if not line:
+        return False
+    return line in directive_lines or (line - 1) in directive_lines
+
+
 def baseline_payload(fingerprints, tool: str) -> dict:
     """Deterministic baseline content: sorted, de-duplicated fingerprints + a header."""
     return {"tool": tool, "fingerprints": sorted(set(fingerprints))}
@@ -86,14 +119,49 @@ def write_baseline(path: Path, fingerprints, tool: str) -> int:
     return len(payload["fingerprints"])
 
 
-def load_baseline(path: Path) -> set[str]:
-    """The fingerprints recorded in a baseline file (empty if absent/unreadable/malformed)."""
+class BaselineError(Exception):
+    """A ``--baseline`` file that cannot be used as given — missing, unreadable,
+    not valid JSON, the wrong shape, or written by a different tool. Raised so an
+    unusable baseline is a loud, user-facing error rather than a silent empty set
+    that floods every previously-baselined finding back with no explanation
+    (issue #3). A consumer should catch it and surface a friendly message
+    (recommended: a ``click.UsageError`` / exit 2, like a malformed ``rules.yml``)."""
+
+
+def load_baseline(path: Path, tool: str | None = None) -> set[str]:
+    """The fingerprints recorded in a baseline file.
+
+    Raises :class:`BaselineError` — never a silently-empty set — when the file is
+    **missing, unreadable, not valid JSON, or the wrong shape**: an unusable
+    baseline means every baselined finding resurfaces, and returning ``set()``
+    gave the user no reason why. When ``tool`` is given and the baseline records a
+    *different* ``tool``, that is a BaselineError too (a coop-sql-review baseline
+    handed to coop-dax-review is a misconfiguration, not an empty baseline); a
+    baseline with no recorded tool is accepted. Valid ``{"tool","fingerprints"}``
+    dicts and bare fingerprint lists load unchanged.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise BaselineError(f"baseline file not found: {path}")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return set()
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BaselineError(f"baseline file could not be read: {path} ({exc})") from exc
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise BaselineError(f"baseline file is not valid JSON: {path} ({exc})") from exc
     if isinstance(data, dict):
+        recorded = data.get("tool")
+        if tool is not None and recorded is not None and str(recorded) != tool:
+            raise BaselineError(
+                f"baseline file {path} was written by {str(recorded)!r}, not {tool!r} — "
+                "use a baseline created by this tool (re-run --write-baseline)"
+            )
         return {str(fp) for fp in data.get("fingerprints", [])}
     if isinstance(data, list):
         return {str(fp) for fp in data}
-    return set()
+    raise BaselineError(
+        f"baseline file has an unexpected shape ({type(data).__name__}); expected a JSON "
+        f"object or a list of fingerprints: {path}"
+    )

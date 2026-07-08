@@ -77,10 +77,29 @@ class RuleConfig:
 
     @classmethod
     def load(cls, path: Path | None) -> "RuleConfig":
-        """Load a rules.yml, or return an empty (all-enabled) config."""
-        if path is None or not path.is_file():
+        """Load a rules.yml from ``path``, or return an empty (all-enabled) config.
+
+        A thin read-then-:meth:`loads` (single read, ``utf-8-sig`` so a BOM from a
+        PowerShell redirect is tolerated). For the CLI's friendly-error contract —
+        encoding sniff, one-line messages, and the raw mapping for extra-key checks
+        — use :func:`load_config_friendly` instead (issue #4)."""
+        if path is None or not Path(path).is_file():
             return cls()
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return cls.loads(Path(path).read_text(encoding="utf-8-sig"))
+
+    @classmethod
+    def loads(cls, text: str) -> "RuleConfig":
+        """Build a RuleConfig from already-read rules.yml ``text`` (empty text ->
+        empty config), so a caller that already has the text doesn't re-read the
+        file. Lenient on shape (a non-mapping top level / ``rules:`` is treated as
+        empty); still raises :class:`StandardsError` on an invalid ``severity``."""
+        return cls._from_data(yaml.safe_load(text) if text.strip() else None)
+
+    @classmethod
+    def _from_data(cls, data: object) -> "RuleConfig":
+        """Build a RuleConfig from parsed YAML ``data``. Shared by :meth:`loads`
+        and :func:`load_config_friendly`; lenient on shape by design (the friendly
+        loader does the strict shape validation before calling this)."""
         rules = data.get("rules", {}) if isinstance(data, dict) else {}
         disabled: set[str] = set()
         enabled: set[str] = set()
@@ -118,6 +137,75 @@ class RuleConfig:
     def unknown_rule_ids(self, known: set[str]) -> list[str]:
         """Configured rule ids that don't match any real rule (typos / removed rules)."""
         return sorted(self.configured - known)
+
+
+# The `syntax_errors:` knob shared by the linters (issue #4/#1): a valid syntax
+# diagnostic is kept as an error (default), demoted to a warning, or dropped.
+SYNTAX_ERROR_MODES = ("error", "warning", "off")
+
+# The friendly, one-line problem messages (no traceback) for a bad rules.yml.
+# Kept verbatim from the tools' own `_load_rule_config` so their existing
+# config-error tests keep passing after they switch to `load_config_friendly`.
+_MSG_NOT_UTF8 = "the file is not UTF-8 - re-save it as UTF-8 (PowerShell '>' writes UTF-16)"
+_MSG_TOP_LEVEL = "the top level must be a mapping (e.g. a `rules:` section)"
+_MSG_RULES_MAPPING = "`rules:` must be a mapping of rule ids to settings, not a list"
+
+
+def parse_syntax_errors_knob(raw: object, modes: tuple[str, ...] = SYNTAX_ERROR_MODES) -> str:
+    """Resolve a ``syntax_errors:`` knob value to a mode string.
+
+    YAML 1.1 coerces a bare unquoted ``off``/``no`` to the boolean ``False`` (and
+    ``on``/``yes``/``true`` to ``True``), so ``syntax_errors: off`` arrives as
+    ``False`` — mapped here to ``"off"`` so it works unquoted; a truthy form has no
+    matching mode and is rejected. Raises :class:`StandardsError` on an unknown
+    value (the caller wraps it in its own friendly one-liner)."""
+    candidate = "off" if raw is False else str(raw).strip().lower()
+    if candidate not in modes:
+        raise StandardsError(f"`syntax_errors` must be one of {', '.join(modes)} (got '{raw}')")
+    return candidate
+
+
+def load_config_friendly(path: Path | None) -> tuple[RuleConfig, dict]:
+    """The full validated rules.yml load for a CLI, click-free.
+
+    ONE read (``utf-8-sig`` + a NUL sniff for UTF-16-without-a-BOM), and returns
+    both the :class:`RuleConfig` AND the raw top-level mapping — so a tool can
+    validate its own extra keys (e.g. a ``syntax_errors:`` knob, via
+    :func:`parse_syntax_errors_knob`) WITHOUT re-reading or re-parsing the file
+    (issue #4 closed the CLI-then-``RuleConfig.load`` double-read/TOCTOU window).
+
+    Every failure mode raises :class:`StandardsError` with a friendly, one-line
+    message (bad encoding, invalid YAML, a non-mapping top level, a non-mapping
+    ``rules:``, an invalid severity, or an otherwise-unexpected structure); the
+    caller wraps it (e.g. ``click.UsageError`` / exit 2). An absent path is the
+    empty config with an empty mapping."""
+    if path is None or not Path(path).is_file():
+        return RuleConfig(), {}
+    path = Path(path)
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+        if "\x00" in text:  # UTF-16 without a BOM decodes as NUL-riddled "UTF-8"
+            raise UnicodeDecodeError("utf-8", b"", 0, 1, "null byte")
+    except UnicodeDecodeError:
+        raise StandardsError(_MSG_NOT_UTF8) from None
+    except OSError as exc:
+        raise StandardsError(str(exc)) from exc
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise StandardsError(f"invalid YAML - {' '.join(str(exc).split())}") from exc
+    if data is not None and not isinstance(data, dict):
+        raise StandardsError(_MSG_TOP_LEVEL)
+    if isinstance(data, dict) and data.get("rules") is not None and not isinstance(data["rules"], dict):
+        raise StandardsError(_MSG_RULES_MAPPING)
+    try:
+        config = RuleConfig._from_data(data)
+    except StandardsError:
+        raise
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        # A malformed `ignore:` entry etc. still surfaces as the same friendly line.
+        raise StandardsError(f"unexpected structure ({exc})") from exc
+    return config, (data if isinstance(data, dict) else {})
 
 
 def apply_config(rules: list, config: RuleConfig) -> list:
@@ -231,10 +319,21 @@ def _is_top_level_key(line: str) -> bool:
     return bool(line) and not line[0].isspace() and re.match(r"[^\s#][^:]*:", line) is not None
 
 
+def _ends_ignore_block(line: str) -> bool:
+    """True for a line that ENDS the ``ignore:`` block: a top-level key, or a
+    **column-0 comment** — a user's hand-written top-level note that follows the
+    block and must be preserved. An INDENTED comment (aligned with the entries)
+    is NOT an end marker: it is owned by the writer and rewritten with the block."""
+    return _is_top_level_key(line) or (bool(line) and line[0] == "#")
+
+
 def _replace_ignore_block(text: str, block: str) -> str:
     """Return ``text`` with its top-level ``ignore:`` block replaced by ``block``
-    (or ``block`` appended if there is none). Everything else — comments and the
-    ``rules:`` section — is preserved verbatim."""
+    (or ``block`` appended if there is none). Everything outside the block —
+    the ``rules:`` section, top-level keys, and **top-level (column-0) comments**,
+    including one that immediately follows the block or sits at EOF — is preserved
+    verbatim. A comment *indented inside* the block is part of the rewritten
+    entries and is intentionally dropped."""
     lines = text.splitlines(keepends=True)
     start = next((i for i, ln in enumerate(lines) if re.match(r"ignore\s*:", ln)), None)
     if start is None:
@@ -243,11 +342,13 @@ def _replace_ignore_block(text: str, block: str) -> str:
         if text.strip():  # keep a blank line between the existing content and the block
             text += "\n"
         return text + block
+    # The block owns its `ignore:` line, its indented entries, and any trailing
+    # blank lines — up to the first top-level key OR top-level comment.
     end = start + 1
-    while end < len(lines) and (not lines[end].strip() or not _is_top_level_key(lines[end])):
+    while end < len(lines) and not _ends_ignore_block(lines[end]):
         end += 1
     tail = lines[end:]
-    # A following top-level key stays readable with a blank line before it.
+    # A following top-level key/comment stays readable with exactly one blank line.
     sep = "\n" if tail and tail[0].strip() else ""
     return "".join(lines[:start]) + block + sep + "".join(tail)
 
