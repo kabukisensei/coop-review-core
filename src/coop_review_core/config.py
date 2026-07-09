@@ -25,6 +25,7 @@ import json
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any, TypeVar
 
 import yaml
 
@@ -227,15 +228,24 @@ def load_config_friendly(path: Path | None) -> tuple[RuleConfig, dict]:
     return config, (data if isinstance(data, dict) else {})
 
 
-def apply_config(rules: list, config: RuleConfig) -> list:
+# Each linter's own Rule dataclass flows through apply_config unchanged: the
+# TypeVar keeps `list[Rule] -> list[Rule]` for the consumer's type checker.
+# Plain TypeVar, not PEP 695 syntax — this package stays 3.10-compatible.
+RuleT = TypeVar("RuleT")
+
+
+def apply_config(rules: list[RuleT], config: RuleConfig) -> list[RuleT]:
     """Select active rules and apply severity / params overrides (non-mutating).
 
     A rule runs unless it is explicitly disabled, or it is off-by-default and not
     explicitly enabled in the config. Works on any rule dataclass with the
     ``id`` / ``severity`` / ``default_enabled`` / ``params`` fields.
     """
-    out: list = []
-    for rule in rules:
+    out: list[RuleT] = []
+    for original in rules:
+        # Typed as Any inside: the contract is structural (any dataclass carrying
+        # the four fields), which a plain TypeVar can't express to a type checker.
+        rule: Any = original
         if rule.id in config.disabled:
             continue
         if not rule.default_enabled and rule.id not in config.enabled:

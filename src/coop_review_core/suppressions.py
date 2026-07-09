@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import Path
 
@@ -126,12 +127,12 @@ def is_syntax_ignored(line: int, directive_lines: set[int]) -> bool:
     return line in directive_lines or (line - 1) in directive_lines
 
 
-def baseline_payload(fingerprints, tool: str) -> dict:
+def baseline_payload(fingerprints: Iterable[str], tool: str) -> dict:
     """Deterministic baseline content: sorted, de-duplicated fingerprints + a header."""
     return {"tool": tool, "fingerprints": sorted(set(fingerprints))}
 
 
-def write_baseline(path: Path, fingerprints, tool: str) -> int:
+def write_baseline(path: Path, fingerprints: Iterable[str], tool: str) -> int:
     """Write a baseline file; returns how many fingerprints it recorded."""
     payload = baseline_payload(fingerprints, tool)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
