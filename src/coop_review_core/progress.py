@@ -15,6 +15,8 @@ from contextlib import contextmanager
 
 import click
 
+__all__ = ["Tick", "should_enable", "Progress"]
+
 # A tick callback: called once per processed item. The optional argument is the
 # item's label (e.g. file path), accepted and ignored so callers pass uniformly.
 Tick = Callable[..., None]

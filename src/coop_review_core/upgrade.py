@@ -24,6 +24,25 @@ from importlib import metadata
 from itertools import zip_longest
 from pathlib import Path
 
+from coop_review_core.errors import CoopReviewError
+
+__all__ = [
+    "PYPI_JSON_URL",
+    "NETWORK_TIMEOUT_SECONDS",
+    "is_vcs_spec",
+    "UpgradeError",
+    "DependencyStatus",
+    "UpgradePlan",
+    "classify_update",
+    "direct_dependencies",
+    "pip_install_origin",
+    "detect_install_method",
+    "fetch_latest_version",
+    "build_plan",
+    "upgrade_command",
+    "apply_plan",
+]
+
 PYPI_JSON_URL = "https://pypi.org/pypi/{name}/json"
 NETWORK_TIMEOUT_SECONDS = 10
 # A pip spec from a version control system: "git+…", "hg+…", "svn+…", "bzr+…".
@@ -37,7 +56,7 @@ def is_vcs_spec(spec: str | None) -> bool:
     return bool(spec and _VCS_SPEC_RE.match(spec))
 
 
-class UpgradeError(Exception):
+class UpgradeError(CoopReviewError):
     """A user-facing upgrade problem; the message is printable as-is."""
 
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 
+__all__ = ["SEVERITIES", "severity_rank", "at_or_above", "fingerprint"]
+
 SEVERITIES = ("error", "warning", "info")
 _SEVERITY_RANK = {"error": 0, "warning": 1, "info": 2}
 

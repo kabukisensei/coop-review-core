@@ -16,6 +16,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+__all__ = [
+    "DIAGNOSTIC_SEVERITIES",
+    "RULE_ERROR",
+    "PARSE_FAILED",
+    "PARSE_DEGRADED",
+    "FILE_UNREADABLE",
+    "CONFIG_UNKNOWN_RULE",
+    "BASELINE_STALE",
+    "IGNORE_STALE",
+    "SCAN_EMPTY",
+    "SYNTAX_ERROR",
+    "Diagnostic",
+]
+
 DIAGNOSTIC_SEVERITIES = ("error", "warning")
 
 # categories

@@ -28,7 +28,21 @@ from pathlib import Path
 
 import yaml
 
+from coop_review_core.errors import CoopReviewError
 from coop_review_core.severity import SEVERITIES
+
+__all__ = [
+    "StandardsError",
+    "resolve_standards_path",
+    "standards_info",
+    "default_config_path",
+    "RuleConfig",
+    "SYNTAX_ERROR_MODES",
+    "parse_syntax_errors_knob",
+    "load_config_friendly",
+    "apply_config",
+    "add_ignores",
+]
 
 # The optional keys an ``ignore:`` entry may carry, rendered in this order.
 # ``fingerprint`` is the only match key; the rest are human context.
@@ -39,7 +53,7 @@ _YAML_KEYWORDS = {"true", "false", "null", "yes", "no", "on", "off", "none", "~"
 _YAML_LEADING_INDICATORS = set("-?:,[]{}#&*!|>'\"%@`")
 
 
-class StandardsError(Exception):
+class StandardsError(CoopReviewError):
     """A user-facing problem locating or reading the standards file."""
 
 

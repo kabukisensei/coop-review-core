@@ -12,7 +12,14 @@ tool name, and standards file:
   severity/params overrides, and the human-readable ``ignore:`` finding list +
   its :func:`~coop_review_core.config.add_ignores` writer) + standards resolution.
 
+- :mod:`coop_review_core.errors`       — :class:`CoopReviewError`, the common base of
+  every user-facing error core raises (StandardsError, BaselineError, UpgradeError).
+
 Each linter keeps its own parsers, rules, Finding/Result model, and standards.md.
 """
+
+from coop_review_core.errors import CoopReviewError
+
+__all__ = ["CoopReviewError"]
 
 __version__ = "0.3.1"

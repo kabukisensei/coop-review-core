@@ -41,7 +41,7 @@ Hard properties to preserve:
 
 | Path | What it is |
 |---|---|
-| `src/coop_review_core/` | the package (seven files; module map below) |
+| `src/coop_review_core/` | the package (module map below) |
 | `tests/` | pytest suite; `conftest.py` prepends `src/` to `sys.path` so tests run uninstalled |
 | `.github/workflows/ci.yml` | on push to `main` / PR: ruff lint + format check, pytest on Python 3.10–3.13 × ubuntu/windows |
 | `.github/workflows/publish.yml` | tag-triggered: gate → build → PyPI → GitHub Release |
@@ -56,7 +56,8 @@ commit it.
 
 | Module | Responsibility |
 |---|---|
-| `__init__.py` | package docstring + `__version__` — the single version source (see Release). |
+| `__init__.py` | package docstring + `__version__` — the single version source (see Release) — and the `CoopReviewError` re-export. |
+| `errors.py` | `CoopReviewError`, the common base of every user-facing error core raises (`StandardsError`, `BaselineError`, `UpgradeError` all subclass it). |
 | `progress.py` | stderr-only, TTY-gated scan progress (`Progress`, `should_enable`, `Tick`); a cheap no-op when quiet, piped, or in CI. |
 | `diagnostics.py` | the `Diagnostic` model + category constants for *processing* problems (parse failures, rule crashes, stale baseline/ignore entries) so nothing fails silently. |
 | `severity.py` | severity ordering (`SEVERITIES`, `severity_rank`, `at_or_above`) + `fingerprint(*parts)` — the stable, line-independent 12-hex-char finding id. |
@@ -99,7 +100,23 @@ files depend on these — breaking any of them is NOT a minor release):
 - the `fingerprint` algorithm and 12-char length — a change invalidates every user's baseline and rules.yml `ignore:` list;
 - the directive grammar `<tool>:ignore [RULE-IDS | *] [reason: ...]` and its fail-closed behavior;
 - the baseline JSON shape `{"tool": ..., "fingerprints": [...]}`;
-- the rules.yml schema (`rules:` map with `enabled` / `severity` / `params`; top-level `ignore:` list).
+- the rules.yml schema (`rules:` map with `enabled` / `severity` / `params`; top-level `ignore:` list);
+- `CoopReviewError` as the common base of `StandardsError` / `BaselineError` / `UpgradeError`
+  (consumers may catch it as "any core failure" — re-parenting any of the three off it is a break).
+
+**Pin / deprecation policy** (issue #8; `__all__` in every module mirrors the public surface —
+anything underscore-prefixed or absent from `__all__` is private and may change without notice):
+
+- Core **never removes or breaks a public name that a shipped consumer wheel imports at module
+  load** while uncapped `>=` pins on it exist. Both published linters pin `coop-review-core>=X`
+  uncapped and import (e.g.) `apply_plan` at import time — removing such a name would break every
+  already-installed consumer wheel on its next `pip install -U coop-review-core`. Removal
+  requires a **major** core version AND a released generation of every consumer that no longer
+  imports the name; until then a deprecated name stays importable (`apply_plan` is the standing
+  example).
+- Consumers SHOULD additionally cap their pin going forward (`coop-review-core>=0.4,<0.5`) and
+  bump the cap with each core release — belt-and-braces on top of the core-side rule, and it
+  matches the documented core-first release train.
 
 ## Runbook
 

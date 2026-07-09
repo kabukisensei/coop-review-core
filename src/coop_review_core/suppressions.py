@@ -21,6 +21,19 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+from coop_review_core.errors import CoopReviewError
+
+__all__ = [
+    "scan_directives",
+    "is_inline_suppressed",
+    "scan_syntax_ignores",
+    "is_syntax_ignored",
+    "baseline_payload",
+    "write_baseline",
+    "BaselineError",
+    "load_baseline",
+]
+
 _RULE_ID_RE = re.compile(r"[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+")
 
 # The reason/comment delimiter that ends a directive's rule-id list. IGNORECASE
@@ -125,7 +138,7 @@ def write_baseline(path: Path, fingerprints, tool: str) -> int:
     return len(payload["fingerprints"])
 
 
-class BaselineError(Exception):
+class BaselineError(CoopReviewError):
     """A ``--baseline`` file that cannot be used as given — missing, unreadable,
     not valid JSON, the wrong shape, or written by a different tool. Raised so an
     unusable baseline is a loud, user-facing error rather than a silent empty set
