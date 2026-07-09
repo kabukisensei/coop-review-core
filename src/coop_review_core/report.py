@@ -41,6 +41,10 @@ __all__ = [
     "envelope_text",
     "diagnostic_json",
     "log_text",
+    "SARIF_LEVEL",
+    "SARIF_FINGERPRINT_KEY",
+    "sarif_location",
+    "to_sarif",
 ]
 
 # --- console chrome -----------------------------------------------------------
@@ -235,3 +239,129 @@ def log_text(diagnostics: Sequence[Diagnostic], *, tool: str, checked: int, unit
         return header + "\nNo diagnostics.\n"
     body = "\n".join(diag.as_line() for diag in diagnostics)
     return f"{header}\n{body}\n"
+
+
+# --- SARIF 2.1.0 (GitHub code scanning / Azure DevOps PR annotations) ----------------
+
+SARIF_LEVEL = {"error": "error", "warning": "warning", "info": "note"}
+# Default partialFingerprints KEY, deliberately frozen at v2 for coop-sql-review
+# (its shipped value). GitHub code scanning matches alerts across runs by
+# (key, value) pair; renaming an already-shipped key would orphan every existing
+# alert and re-open it as new. The VALUES are whatever fingerprint scheme the
+# tool computes today — only the label stays put. A tool bumps ITS key (via the
+# ``fingerprint_key`` parameter) only if a future scheme changes identities so
+# broadly that a clean alert reset is the better trade.
+SARIF_FINGERPRINT_KEY = "coopFingerprint/v2"
+
+
+def sarif_location(uri: str, line: int) -> dict:
+    """One SARIF physical location; the region is omitted for file-level results (line 0)."""
+    phys: dict = {"artifactLocation": {"uri": uri}}
+    if line:
+        phys["region"] = {"startLine": line}
+    return {"physicalLocation": phys}
+
+
+def to_sarif(
+    *,
+    tool_name: str,
+    information_uri: str,
+    version: str,
+    driver_rules: list[dict],
+    findings: Sequence[Mapping],
+    agent_review: Sequence[Mapping] = (),
+    diagnostics: Sequence[Diagnostic] = (),
+    diagnostics_rule_id: str = "syntax-error",
+    diagnostics_rule_description: str = (
+        "A processing problem: a real syntax error, a rule crash, or an unreadable file."
+    ),
+    fingerprint_key: str = SARIF_FINGERPRINT_KEY,
+) -> str:
+    """A deterministic single-run SARIF 2.1.0 log (string + trailing LF).
+
+    Findings/agent-items/error-diagnostics become ``results`` with SARIF ``level``
+    (error/warning/note), a physical location, and ``partialFingerprints`` (GitHub
+    uses them to dedupe alerts across runs). Warning-severity diagnostics are
+    advisory processing notes and are intentionally NOT emitted. No timestamps ->
+    byte-stable (``sort_keys`` + ``ensure_ascii``).
+
+    The linter supplies its identity and metadata as plain data:
+
+    - ``driver_rules``: its pre-built SARIF rule entries (``id`` / ``name`` /
+      ``shortDescription`` / ``defaultConfiguration`` / ``properties``), WITHOUT
+      the synthetic diagnostics rule — core appends that one (``ruleIndex`` =
+      ``len(driver_rules)``) so genuinely broken input still annotates the PR line.
+    - ``findings``: mappings with ``rule_id`` / ``severity`` / ``file`` / ``line``
+      / ``message`` / ``fingerprint`` (the fingerprint pre-computed tool-side).
+    - ``agent_review``: mappings with ``rule_id`` / ``note`` / ``file`` / ``line``
+      / ``fingerprint`` — judgment items are visible but never blocking (``note``).
+    - ``fingerprint_key``: the partialFingerprints label. coop-sql-review MUST
+      keep passing (or defaulting to) ``coopFingerprint/v2`` — see the frozen-key
+      note on :data:`SARIF_FINGERPRINT_KEY`.
+    """
+    rule_index = {rule["id"]: i for i, rule in enumerate(driver_rules)}
+    all_rules = list(driver_rules)
+    diag_index = len(all_rules)
+    all_rules.append(
+        {
+            "id": diagnostics_rule_id,
+            "name": diagnostics_rule_id,
+            "shortDescription": {"text": diagnostics_rule_description},
+            "defaultConfiguration": {"level": "error"},
+        }
+    )
+
+    results: list[dict] = []
+    for f in findings:
+        row = {
+            "ruleId": f["rule_id"],
+            "level": SARIF_LEVEL.get(f["severity"], "note"),
+            "message": {"text": f["message"]},
+            "locations": [sarif_location(f["file"], f["line"])],
+            "partialFingerprints": {fingerprint_key: f["fingerprint"]},
+        }
+        if f["rule_id"] in rule_index:
+            row["ruleIndex"] = rule_index[f["rule_id"]]
+        results.append(row)
+    for a in agent_review:
+        row = {
+            "ruleId": a["rule_id"],
+            "level": "note",  # judgment items are visible but never blocking
+            "message": {"text": a["note"]},
+            "locations": [sarif_location(a["file"], a["line"])],
+            "partialFingerprints": {fingerprint_key: a["fingerprint"]},
+        }
+        if a["rule_id"] in rule_index:
+            row["ruleIndex"] = rule_index[a["rule_id"]]
+        results.append(row)
+    for d in diagnostics:
+        if d.severity != "error":
+            continue  # warning-severity processing notes are not surfaced as SARIF results
+        results.append(
+            {
+                "ruleId": diagnostics_rule_id,
+                "ruleIndex": diag_index,
+                "level": "error",
+                "message": {"text": d.message},
+                "locations": [sarif_location(d.file, d.line)],
+            }
+        )
+
+    log = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": tool_name,
+                        "version": version,
+                        "informationUri": information_uri,
+                        "rules": all_rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+    return json.dumps(log, indent=2, sort_keys=True, ensure_ascii=True) + "\n"

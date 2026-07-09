@@ -202,3 +202,112 @@ def test_log_text_empty_and_populated_match_the_twins_format():
     diag = Diagnostic(severity="warning", category="parse_degraded", file="a.sql", line=4, message="m")
     text = log_text([diag], tool="coop-dax-review", checked=1, unit="model")
     assert text == ("coop-dax-review diagnostics log - 1 model(s) checked\n" + diag.as_line() + "\n")
+
+
+# --- SARIF (issue #11) ---------------------------------------------------------------
+
+
+def _sample_sarif(**overrides) -> str:
+    from coop_review_core.report import to_sarif
+
+    kwargs = dict(
+        tool_name="coop-sql-review",
+        information_uri="https://github.com/kabukisensei/coop-sql-review",
+        version="9.9.9",
+        driver_rules=[
+            {
+                "id": "SQL-A",
+                "name": "SQL-A",
+                "shortDescription": {"text": "rule a"},
+                "defaultConfiguration": {"level": "warning"},
+            }
+        ],
+        findings=[
+            {
+                "rule_id": "SQL-A",
+                "severity": "warning",
+                "file": "a.sql",
+                "line": 3,
+                "message": "m1",
+                "fingerprint": "aaaaaaaaaaaa",
+            },
+            {
+                "rule_id": "SQL-GONE",
+                "severity": "bogus",
+                "file": "b.sql",
+                "line": 0,
+                "message": "m2",
+                "fingerprint": "bbbbbbbbbbbb",
+            },
+        ],
+        agent_review=[
+            {
+                "rule_id": "SQL-A",
+                "note": "judge me",
+                "file": "c.sql",
+                "line": 9,
+                "fingerprint": "cccccccccccc",
+            }
+        ],
+        diagnostics=[
+            Diagnostic(severity="error", category="syntax_error", file="d.sql", line=2, message="broken"),
+            Diagnostic(severity="warning", category="parse_degraded", file="d.sql", line=0, message="meh"),
+        ],
+        diagnostics_rule_description="A processing problem.",
+    )
+    kwargs.update(overrides)
+    return to_sarif(**kwargs)
+
+
+def test_sarif_skeleton_and_determinism():
+    text = _sample_sarif()
+    assert text == _sample_sarif()  # byte-identical across calls
+    assert text.endswith("\n") and text.isascii()
+    log = json.loads(text)
+    assert log["$schema"] == "https://json.schemastore.org/sarif-2.1.0.json"
+    assert log["version"] == "2.1.0"
+    driver = log["runs"][0]["tool"]["driver"]
+    assert driver["name"] == "coop-sql-review"
+    assert driver["version"] == "9.9.9"
+    assert driver["informationUri"] == "https://github.com/kabukisensei/coop-sql-review"
+
+
+def test_sarif_severity_to_level_mapping_and_rule_index():
+    log = json.loads(_sample_sarif())
+    results = log["runs"][0]["results"]
+    finding_row, unknown_row, agent_row, diag_row = results
+    assert finding_row["level"] == "warning"
+    assert finding_row["ruleIndex"] == 0  # matched in the driver rules table
+    assert finding_row["locations"][0]["physicalLocation"]["region"] == {"startLine": 3}
+    assert unknown_row["level"] == "note"  # unknown severity -> note
+    assert "ruleIndex" not in unknown_row  # no metadata row for an unknown rule id
+    assert "region" not in unknown_row["locations"][0]["physicalLocation"]  # line 0 omits it
+    assert agent_row["level"] == "note"  # judgment items never block
+    assert agent_row["message"] == {"text": "judge me"}
+
+
+def test_sarif_diagnostics_become_the_synthetic_rule_errors_only():
+    log = json.loads(_sample_sarif())
+    driver_rules = log["runs"][0]["tool"]["driver"]["rules"]
+    assert driver_rules[-1]["id"] == "syntax-error"
+    assert driver_rules[-1]["shortDescription"] == {"text": "A processing problem."}
+    assert driver_rules[-1]["defaultConfiguration"] == {"level": "error"}
+    results = log["runs"][0]["results"]
+    diag_rows = [r for r in results if r["ruleId"] == "syntax-error"]
+    assert len(diag_rows) == 1  # the warning-severity diagnostic is NOT emitted
+    assert diag_rows[0]["ruleIndex"] == 1  # appended after the tool's own rules
+    assert diag_rows[0]["level"] == "error"
+    assert "partialFingerprints" not in diag_rows[0]
+
+
+def test_sarif_fingerprint_key_defaults_frozen_and_is_injectable():
+    from coop_review_core.report import SARIF_FINGERPRINT_KEY
+
+    # coop-sql-review's shipped key: frozen for GitHub alert continuity. Renaming
+    # the DEFAULT would orphan every existing code-scanning alert on its flip.
+    assert SARIF_FINGERPRINT_KEY == "coopFingerprint/v2"
+    log = json.loads(_sample_sarif())
+    row = log["runs"][0]["results"][0]
+    assert row["partialFingerprints"] == {"coopFingerprint/v2": "aaaaaaaaaaaa"}
+    custom = json.loads(_sample_sarif(fingerprint_key="daxFingerprint/v1"))
+    assert custom["runs"][0]["results"][0]["partialFingerprints"] == {"daxFingerprint/v1": "aaaaaaaaaaaa"}
