@@ -1,0 +1,204 @@
+"""The shared report layer: console/HTML chrome, the logo asset, and the
+machine-JSON envelope (issue #9)."""
+
+import base64
+import json
+
+from coop_review_core.diagnostics import Diagnostic
+from coop_review_core.report import (
+    ANSI,
+    BADGE,
+    BADGE_COLOR,
+    HTML_STYLE,
+    LOGO_PATH,
+    build_envelope,
+    chip,
+    diagnostic_json,
+    envelope_text,
+    esc,
+    log_text,
+    logo_data_uri,
+    sty,
+    verdict,
+)
+
+# --- console chrome -------------------------------------------------------------
+
+
+def test_badges_are_ascii_and_aligned():
+    assert set(BADGE) == set(BADGE_COLOR) == {"error", "warning", "info"}
+    for text in BADGE.values():
+        assert len(text) == 5
+        assert text.isascii()
+
+
+def test_sty_no_color_returns_text_unchanged():
+    assert sty("hello", "red", "bold", color=False) == "hello"
+    assert sty("hello", color=True) == "hello"  # no codes -> unchanged
+
+
+def test_sty_wraps_with_ansi_codes_and_reset():
+    styled = sty("hello", "red", "bold", color=True)
+    assert styled == ANSI["red"] + ANSI["bold"] + "hello" + ANSI["reset"]
+    assert styled.isascii()  # ANSI escapes are ASCII -> cp1252-safe
+
+
+# --- HTML chrome ------------------------------------------------------------------
+
+
+def test_html_style_is_the_brand_block():
+    # The palette the twins shipped byte-identically: navy brand, red-orange
+    # accent, the green gradient — and no leading/trailing whitespace.
+    for token in ("#004068", "#e84028", "#407838", "#80a840", "#b0d030"):
+        assert token in HTML_STYLE
+    assert HTML_STYLE == HTML_STYLE.strip()
+
+
+def test_logo_data_uri_embeds_the_bundled_png():
+    assert LOGO_PATH.is_file(), "the logo must ship with core (single bundled copy)"
+    uri = logo_data_uri()
+    assert uri.startswith("data:image/png;base64,")
+    payload = base64.b64decode(uri.split(",", 1)[1])
+    assert payload == LOGO_PATH.read_bytes()
+    assert logo_data_uri() == uri  # deterministic
+
+
+def test_esc_escapes_html_and_quotes_and_coerces():
+    assert esc('<b a="x">') == "&lt;b a=&quot;x&quot;&gt;"
+    assert esc(42) == "42"
+
+
+def test_chip_known_and_unknown_severity():
+    assert chip("error") == '<span class="chip error">error</span>'
+    assert chip("bogus") == '<span class="chip info">bogus</span>'  # unknown styles as info
+
+
+# --- verdict --------------------------------------------------------------------
+
+
+def test_verdict_clean_run():
+    v = verdict({"error": 0, "warning": 0, "info": 0}, has_findings=False, has_error_diagnostic=False)
+    assert v == {"clean": True, "highest_severity": None}
+
+
+def test_verdict_highest_severity_orders_error_first():
+    v = verdict({"error": 1, "warning": 2, "info": 3}, has_findings=True, has_error_diagnostic=False)
+    assert v == {"clean": False, "highest_severity": "error"}
+    v = verdict({"error": 0, "warning": 0, "info": 3}, has_findings=True, has_error_diagnostic=False)
+    assert v == {"clean": False, "highest_severity": "info"}
+
+
+def test_verdict_error_diagnostic_breaks_clean_even_with_zero_findings():
+    v = verdict({"error": 0, "warning": 0, "info": 0}, has_findings=False, has_error_diagnostic=True)
+    assert v == {"clean": False, "highest_severity": "error"}
+
+
+# --- the JSON envelope -------------------------------------------------------------
+
+_STANDARDS = {"path": "docs/standards.md", "sha256": "abc123"}
+
+
+def _sample_envelope(schema_version: int = 3, checked_key: str = "files_checked") -> dict:
+    findings = [
+        {
+            "rule_id": "SQL-X",
+            "severity": "warning",
+            "file": "a.sql",
+            "line": 3,
+            "object": "dbo.t",
+            "message": "msg",
+            "standard_ref": "§1",
+            "fingerprint": "deadbeef0123",
+        }
+    ]
+    summary = {"error": 0, "warning": 1, "info": 0}
+    diag = Diagnostic(severity="warning", category="parse_degraded", file="a.sql", line=0, message="m")
+    return build_envelope(
+        tool="coop-sql-review",
+        schema_version=schema_version,
+        version="9.9.9",
+        standards=_STANDARDS,
+        checked_key=checked_key,
+        checked=1,
+        verdict=verdict(summary, has_findings=True, has_error_diagnostic=False),
+        findings=findings,
+        summary=summary,
+        agent_review=[],
+        diagnostics=[diagnostic_json(diag)],
+    )
+
+
+def test_envelope_reproduces_the_twins_shape_exactly():
+    envelope = _sample_envelope()
+    # The exact key set the shipped twins emit today (sql spelling).
+    assert set(envelope) == {
+        "tool",
+        "schema_version",
+        "version",
+        "standards",
+        "files_checked",
+        "verdict",
+        "findings",
+        "summary",
+        "agent_review",
+        "diagnostics",
+    }
+    assert envelope["standards"] == {"path": "docs/standards.md", "sha256": "abc123"}
+    assert envelope["schema_version"] == 3  # injected per tool, never baked in
+    # The dax spelling differs only by the checked-count key + its schema_version.
+    dax = _sample_envelope(schema_version=2, checked_key="models_checked")
+    assert "models_checked" in dax and "files_checked" not in dax
+    assert dax["schema_version"] == 2
+
+
+def test_envelope_standards_defaults_to_empty_strings():
+    envelope = build_envelope(
+        tool="t",
+        schema_version=1,
+        version="0",
+        standards={},
+        checked_key="files_checked",
+        checked=0,
+        verdict={"clean": True, "highest_severity": None},
+        findings=[],
+        summary={"error": 0, "warning": 0, "info": 0},
+        agent_review=[],
+        diagnostics=[],
+    )
+    assert envelope["standards"] == {"path": "", "sha256": ""}
+
+
+def test_envelope_text_is_deterministic_sorted_ascii_with_trailing_newline():
+    envelope = _sample_envelope()
+    text = envelope_text(envelope)
+    assert text == envelope_text(_sample_envelope())  # byte-identical across builds
+    assert text.endswith("\n") and not text.endswith("\n\n")
+    assert text.isascii()
+    assert text == json.dumps(envelope, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+    assert json.loads(text) == envelope  # round-trips
+
+
+def test_diagnostic_json_carries_every_field():
+    diag = Diagnostic(
+        severity="error", category="syntax_error", file="x.sql", line=7, message="bad", rule_id="R-1"
+    )
+    assert diagnostic_json(diag) == {
+        "severity": "error",
+        "category": "syntax_error",
+        "file": "x.sql",
+        "line": 7,
+        "message": "bad",
+        "rule_id": "R-1",
+    }
+
+
+# --- the diagnostics log -----------------------------------------------------------
+
+
+def test_log_text_empty_and_populated_match_the_twins_format():
+    assert log_text([], tool="coop-sql-review", checked=2, unit="file") == (
+        "coop-sql-review diagnostics log - 2 file(s) checked\nNo diagnostics.\n"
+    )
+    diag = Diagnostic(severity="warning", category="parse_degraded", file="a.sql", line=4, message="m")
+    text = log_text([diag], tool="coop-dax-review", checked=1, unit="model")
+    assert text == ("coop-dax-review diagnostics log - 1 model(s) checked\n" + diag.as_line() + "\n")

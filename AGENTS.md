@@ -64,6 +64,8 @@ commit it.
 | `suppressions.py` | inline `<tool>:ignore` directives (`scan_directives`, `is_inline_suppressed`; fail-closed on malformed rule ids) + the JSON fingerprint baseline (`write_baseline`, `load_baseline`). |
 | `upgrade.py` | self-update planning/applying (`build_plan`, `upgrade_command`, `apply_plan`). The ONLY networked module (PyPI JSON, `git fetch`); network/subprocess collaborators are injectable so tests stay offline. |
 | `config.py` | the rules.yml layer (`RuleConfig`, `apply_config`, the `ignore:` finding list + its `add_ignores` writer) and standards resolution (`resolve_standards_path`, `standards_info`, `StandardsError`). |
+| `report.py` | the shared report layer (issue #9): console chrome (`BADGE`/`BADGE_COLOR`/`ANSI`/`sty`), the branded `HTML_STYLE` + `logo_data_uri` (the ONE bundled `data/cooptimize-logo.png`), `esc`/`chip`, and the machine-JSON envelope (`verdict`, `build_envelope`, `envelope_text`, `diagnostic_json`, `log_text`). Renders from plain data — never a tool's `Result`. |
+| `data/` | package data shipped in the wheel: `cooptimize-logo.png` (the family's single logo copy). |
 
 `tests/` roughly mirrors the modules (`test_config.py`, `test_diagnostics.py`,
 `test_ignores.py`, `test_severity.py`, `test_suppressions.py`, `test_upgrade.py`) —
