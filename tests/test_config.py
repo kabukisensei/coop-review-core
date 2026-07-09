@@ -69,6 +69,30 @@ def test_unknown_rule_ids():
     assert RuleConfig(configured={"REAL", "TYPO"}).unknown_rule_ids({"REAL"}) == ["TYPO"]
 
 
+def test_non_string_rule_keys_are_coerced_to_str(tmp_path):
+    # YAML parses an unquoted `123:` key as an int. Every key must land as a str:
+    # with a mixed int/str `configured` set, unknown_rule_ids' sorted() raised a
+    # raw TypeError straight through the consumer CLIs (a traceback, violating
+    # their no-traceback contract).
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text(
+        "rules:\n"
+        "  123:\n    enabled: false\n"
+        "  456:\n    enabled: true\n"
+        "  789:\n    severity: error\n    params: { min: 5 }\n"
+        "  TYPO-X:\n    enabled: false\n",
+        encoding="utf-8",
+    )
+    config = RuleConfig.load(cfg)
+    assert config.disabled == {"123", "TYPO-X"}
+    assert config.enabled == {"456"}
+    assert config.severity_overrides == {"789": "error"}
+    assert config.params == {"789": {"min": 5}}
+    assert config.configured == {"123", "456", "789", "TYPO-X"}
+    # mixed unknowns sort fine now — this line used to raise TypeError
+    assert config.unknown_rule_ids({"A-B"}) == ["123", "456", "789", "TYPO-X"]
+
+
 def test_load_parses_ignore_section(tmp_path):
     cfg = tmp_path / "rules.yml"
     cfg.write_text(

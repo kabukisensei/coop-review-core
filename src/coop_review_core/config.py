@@ -105,7 +105,12 @@ class RuleConfig:
         enabled: set[str] = set()
         overrides: dict[str, str] = {}
         params: dict[str, dict] = {}
-        for rule_id, settings in (rules or {}).items():
+        for raw_id, settings in (rules or {}).items():
+            # YAML parses an unquoted numeric key (`123:`) as an int (and `on:`
+            # as a bool, etc.). Coerce every rule id to str so the disabled/
+            # enabled/overrides/params keys stay homogeneous and
+            # unknown_rule_ids' sorted() can't raise a raw TypeError.
+            rule_id = str(raw_id)
             settings = settings or {}
             if settings.get("enabled") is False:
                 disabled.add(rule_id)
@@ -130,7 +135,7 @@ class RuleConfig:
             enabled=enabled,
             severity_overrides=overrides,
             params=params,
-            configured=set(rules or {}),
+            configured={str(rule_id) for rule_id in (rules or {})},
             ignored_fingerprints={e["fingerprint"] for e in _read_ignore_entries(ignore_section)},
         )
 
