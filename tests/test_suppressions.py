@@ -20,6 +20,16 @@ def test_scan_parses_ids_and_stops_at_reason():
     assert scan_directives(text, TOOL) == {2: {"SQL-NO-SELECT-STAR"}}
 
 
+def test_scan_reason_delimiter_is_case_insensitive():
+    # The directive regex is IGNORECASE, so the reason-tail split must be too.
+    # A capitalized `Reason:` used to pass through the split, and a rule id
+    # mentioned in the prose was captured and suppressed (fail-open).
+    text = "-- coop-sql-review:ignore SQL-A Reason: overlaps SQL-B\n"
+    assert scan_directives(text, TOOL) == {1: {"SQL-A"}}
+    text = "-- coop-sql-review:ignore SQL-A REASON: overlaps SQL-B\n"
+    assert scan_directives(text, TOOL) == {1: {"SQL-A"}}
+
+
 def test_scan_bare_is_wildcard():
     assert scan_directives("// coop-sql-review:ignore\n", TOOL) == {1: {"*"}}
 
@@ -136,6 +146,18 @@ def test_scan_syntax_ignores_fires_and_non_fires(tool):
     # a rule-ids-only directive still silences that RULE, but NOT a syntax diagnostic —
     # the two channels stay separate (fail-closed: `syntax` never parses as a rule id).
     assert scan_directives(text, tool).get(4) == {"SQL-NO-SELECT-STAR"}
+
+
+def test_scan_syntax_ignores_reason_delimiter_is_case_insensitive():
+    from coop_review_core.suppressions import scan_syntax_ignores
+
+    # A capitalized `Reason:` tail used to survive the case-sensitive split, so a
+    # `syntax` word in the PROSE turned a rule-ids-only directive into a syntax
+    # ignore (fail-open). The split is now IGNORECASE like the directive regex.
+    text = "-- coop-sql-review:ignore SQL-A Reason: syntax is fine here\n"
+    assert scan_syntax_ignores(text, TOOL) == set()
+    text = "-- coop-sql-review:ignore SQL-A REASON: syntax is fine here\n"
+    assert scan_syntax_ignores(text, TOOL) == set()
 
 
 def test_is_syntax_ignored_line_and_line_above():

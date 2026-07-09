@@ -23,6 +23,12 @@ from pathlib import Path
 
 _RULE_ID_RE = re.compile(r"[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+")
 
+# The reason/comment delimiter that ends a directive's rule-id list. IGNORECASE
+# to match the directive regex below — a case-sensitive split let a capitalized
+# `Reason:` tail fail OPEN (a rule id mentioned in the prose was captured and
+# suppressed too), the exact fail-open scan_directives' docstring rules out.
+_REASON_SPLIT_RE = re.compile(r"\breason\b|--|//|#", re.IGNORECASE)
+
 
 @lru_cache(maxsize=None)
 def _directive_re(tool: str) -> re.Pattern:
@@ -52,7 +58,7 @@ def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
         # Stop at a reason/comment delimiter so a reason mentioning a RULE-LIKE
         # token isn't captured as a rule id.
         raw = match.group(1)
-        head = re.split(r"\breason\b|--|//|#", raw, maxsplit=1)[0]
+        head = _REASON_SPLIT_RE.split(raw, maxsplit=1)[0]
         ids = set(_RULE_ID_RE.findall(head))
         if ids:
             out[lineno] = ids
@@ -92,7 +98,7 @@ def scan_syntax_ignores(text: str, tool: str) -> set[int]:
         match = pattern.search(line)
         if not match:
             continue
-        tail = re.split(r"\breason\b|--|//|#", match.group(1), maxsplit=1)[0]
+        tail = _REASON_SPLIT_RE.split(match.group(1), maxsplit=1)[0]
         tokens = tail.split()
         if not tokens or tail.strip() == "*" or any(token.lower() == "syntax" for token in tokens):
             out.add(lineno)
