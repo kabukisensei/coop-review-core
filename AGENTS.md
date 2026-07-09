@@ -271,3 +271,20 @@ drive this repo's releases too.
 - Never use Python syntax newer than 3.10 (`requires-python = ">=3.10"`).
 - Never commit `dist/`, `.venv/`, `test_env/`, or cache dirs (all gitignored).
 - Never break an item on the do-not-break list in a minor release.
+
+## Working the backlog (agents)
+
+This repo's work queue is its GitHub issues labeled **`agent:ready`**:
+`gh issue list --label agent:ready --state open`. Each issue is self-contained
+(Context / Problem / Proposed fix / Acceptance criteria). Rules of engagement:
+
+- Read this file fully first; take ONE issue at a time (oldest first unless one
+  blocks another).
+- Implement to the acceptance criteria; run the full test suite + lint before
+  every commit; commit with `Fixes #N` so the issue closes on push.
+- Never push tags, release, or bump versions — Aaron releases (see the release
+  rules above).
+- An open issue WITHOUT the `agent:ready` label is waiting on a human decision —
+  leave it alone.
+- The queue may be empty here — core work lands in bursts. Anything you add or
+  change must respect the do-not-break list and pin policy above.
