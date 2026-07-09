@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, TypeVar
@@ -37,6 +38,10 @@ __all__ = [
     "resolve_standards_path",
     "standards_info",
     "default_config_path",
+    "config_env_var",
+    "tool_config_filename",
+    "DiscoveredConfig",
+    "discover_config",
     "RuleConfig",
     "SYNTAX_ERROR_MODES",
     "parse_syntax_errors_knob",
@@ -77,6 +82,127 @@ def standards_info(path: Path) -> dict[str, str]:
 def default_config_path(standards_path: Path) -> Path:
     """Conventional rules.yml location: alongside the standards file."""
     return standards_path.parent / "rules.yml"
+
+
+# --- unified config discovery (issue #12) --------------------------------------
+#
+# One discovery order for the whole family, so a monorepo can run several
+# linters side by side: each tool gets its OWN config filename (derived from its
+# tool name) and env var, while the shared `rules.yml` keeps working everywhere
+# it works today — as a deprecated fallback. The rules.yml SCHEMA is unchanged
+# (do-not-break list); tool-named files use the identical schema.
+
+# The legacy shared config filename every tool historically used.
+_LEGACY_CONFIG_NAME = "rules.yml"
+
+
+def config_env_var(tool: str) -> str:
+    """The env var naming a tool's config file, derived from its tool name
+    (``"coop-sql-review"`` -> ``"COOP_SQL_REVIEW_CONFIG"``)."""
+    return tool.upper().replace("-", "_") + "_CONFIG"
+
+
+def tool_config_filename(tool: str) -> str:
+    """The tool-specific config filename, derived from the tool name
+    (``"coop-sql-review"`` -> ``"coop-sql-review.yml"``). Same schema as rules.yml."""
+    return f"{tool}.yml"
+
+
+@dataclass(frozen=True)
+class DiscoveredConfig:
+    """Where :func:`discover_config` found (or didn't find) a config file.
+
+    ``source`` is one of ``"explicit"`` / ``"env"`` / ``"tool-file"`` /
+    ``"rules-yml"`` / ``"bundled"`` / ``"none"``. ``notes`` carries human-facing
+    one-liners the CLI should surface (core never prints): a deprecation note
+    when the legacy shared ``rules.yml`` name matched, and a shadowing note when
+    a tool-named file won over a ``rules.yml`` sitting in the same directory.
+    """
+
+    path: Path | None
+    source: str
+    notes: tuple[str, ...] = ()
+
+
+def discover_config(
+    tool: str,
+    *,
+    explicit: str | None,
+    env: Mapping[str, str],
+    start: Path,
+    bundled_default: Path | None,
+) -> DiscoveredConfig:
+    """Resolve which config file a run should read. First hit wins:
+
+    1. ``explicit`` (the ``--config`` flag). A missing file is a friendly
+       :class:`StandardsError` — an explicit path that doesn't exist is almost
+       always a typo, and silently running with default rules would drop the
+       team's overrides/ignores. (A tool whose ``--save-ignores`` treats the
+       flag as the file to CREATE should skip this call's error itself, as the
+       CLIs do today.)
+    2. The tool's env var (:func:`config_env_var`, e.g.
+       ``COOP_SQL_REVIEW_CONFIG``) — points a whole CI pipeline at one config
+       without threading ``--config`` through every call site. A set-but-missing
+       path is a :class:`StandardsError` too (a misconfiguration, not a silent
+       fallback); an empty value counts as unset.
+    3. A walk from ``start`` up through its parents, git-style: in each
+       directory the tool-named file (:func:`tool_config_filename`) first, then
+       ``rules.yml`` as the DEPRECATED shared fallback. The walk checks the
+       directory that contains a ``.git`` entry and then stops — a config
+       outside the repository never silently applies — and otherwise stops at
+       the filesystem root.
+    4. ``bundled_default`` — the conventional spot beside the tool's bundled
+       standards (the caller passes :func:`default_config_path`'s result, or
+       ``None``). Returned as-is; like today, it may not exist (the loaders
+       treat a missing file as the empty config).
+
+    Deterministic and hermetic: ``env`` and ``start`` are parameters — core
+    never reads ``os.environ`` or ``Path.cwd()`` itself.
+    """
+    if explicit:
+        path = Path(explicit)
+        if not path.is_file():
+            raise StandardsError(f"config file not found: {explicit}")
+        return DiscoveredConfig(path=path, source="explicit")
+
+    env_name = config_env_var(tool)
+    env_value = env.get(env_name, "")
+    if env_value:
+        path = Path(env_value)
+        if not path.is_file():
+            raise StandardsError(f"config file named by {env_name} not found: {env_value}")
+        return DiscoveredConfig(path=path, source="env")
+
+    tool_name_yml = tool_config_filename(tool)
+    directory = Path(start).resolve()
+    for candidate_dir in (directory, *directory.parents):
+        tool_file = candidate_dir / tool_name_yml
+        legacy_file = candidate_dir / _LEGACY_CONFIG_NAME
+        if tool_file.is_file():
+            notes: tuple[str, ...] = ()
+            if legacy_file.is_file():
+                notes = (
+                    f"{legacy_file.as_posix()} is shadowed by {tool_file.as_posix()} "
+                    "(the tool-named config wins when both sit in one directory)",
+                )
+            return DiscoveredConfig(path=tool_file, source="tool-file", notes=notes)
+        if legacy_file.is_file():
+            return DiscoveredConfig(
+                path=legacy_file,
+                source="rules-yml",
+                notes=(
+                    f"{legacy_file.as_posix()}: found via the deprecated shared name "
+                    f"'{_LEGACY_CONFIG_NAME}' - rename it to '{tool_name_yml}' to make it "
+                    f"specific to {tool} (rules.yml keeps working, but every coop-*-review "
+                    "tool reads it)",
+                ),
+            )
+        if (candidate_dir / ".git").exists():
+            break  # the repo root was checked; never walk above it
+
+    if bundled_default is not None:
+        return DiscoveredConfig(path=bundled_default, source="bundled")
+    return DiscoveredConfig(path=None, source="none")
 
 
 @dataclass

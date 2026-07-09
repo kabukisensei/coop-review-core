@@ -80,7 +80,7 @@ against both current linters:
 
 | The linter supplies | Consumed by |
 |---|---|
-| its **tool name** (e.g. `"coop-sql-review"` — the inline-directive marker and baseline tag) | `scan_directives(text, tool)`, `write_baseline(path, fingerprints, tool)`, `baseline_payload(fingerprints, tool)` |
+| its **tool name** (e.g. `"coop-sql-review"` — the inline-directive marker and baseline tag; the config filename `<tool>.yml` and env var `COOP_<TOOL>_CONFIG` are DERIVED from this same value via `tool_config_filename` / `config_env_var`) | `scan_directives(text, tool)`, `write_baseline(path, fingerprints, tool)`, `baseline_payload(fingerprints, tool)`, `discover_config(tool, explicit=, env=, start=, bundled_default=)` |
 | its **package name + running `__version__`** | `build_plan(package_name, current_version, ...)` |
 | its **bundled standards path** (a `Path` to its own `data/standards.md`) | `resolve_standards_path(explicit, bundled)` |
 | its own **`Rule` dataclass** — any dataclass carrying `id`, `severity`, `default_enabled`, `params` fields | `apply_config(rules, config)` (copies via `dataclasses.replace`, so extra fields like `title` / `check` are fine) |
