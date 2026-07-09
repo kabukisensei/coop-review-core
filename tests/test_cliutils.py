@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import shlex
+
 import click
 import pytest
 
@@ -245,7 +247,11 @@ def test_run_upgrade_shlex_quotes_paths_with_spaces(capsys):
     plan = _plan(install_method="git-checkout", checkout=Path("/tmp/my checkout"), needs_pull=False)
     run_upgrade(False, tool_name="coop-x-review", plan=plan)
     out = capsys.readouterr().out
-    assert "python -m pip install -U '/tmp/my checkout'" in out  # shlex.join keeps it pasteable
+    # shlex.join keeps the command pasteable; the path itself renders via
+    # str(Path(...)), which is backslashed on Windows — build the expectation
+    # the same way so the assertion is platform-independent.
+    expected = f"python -m pip install -U {shlex.quote(str(Path('/tmp/my checkout')))}"
+    assert expected in out
 
 
 def test_with_upgrade_options_adds_the_check_flag_per_command():
