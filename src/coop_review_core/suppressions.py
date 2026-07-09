@@ -19,12 +19,15 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 from coop_review_core.errors import CoopReviewError
 
 __all__ = [
+    "DirectiveScan",
+    "scan_all_directives",
     "scan_directives",
     "is_inline_suppressed",
     "scan_syntax_ignores",
@@ -52,6 +55,52 @@ def _directive_re(tool: str) -> re.Pattern:
     return re.compile(rf"(?<![\w-]){re.escape(tool)}\s*:\s*ignore\b([^\n]*)", re.IGNORECASE)
 
 
+@dataclass(frozen=True)
+class DirectiveScan:
+    """Both views of one single-pass directive scan (:func:`scan_all_directives`)."""
+
+    rule_ignores: dict[int, set[str]]  # scan_directives' exact result
+    syntax_ignore_lines: set[int]  # scan_syntax_ignores' exact result
+
+
+def scan_all_directives(text: str, tool: str) -> DirectiveScan:
+    """Scan ``text`` ONCE for ``<tool>:ignore`` directives and return both views:
+    the per-line rule-id map (:func:`scan_directives`) and the syntax-ignore line
+    set (:func:`scan_syntax_ignores`).
+
+    One loop, one tail-split per matched line — so the two views are derived from
+    the same directive grammar *structurally* (they cannot drift apart the way two
+    hand-synchronized loops once did), and a consumer that needs both pays for one
+    scan per file instead of two.
+    """
+    pattern = _directive_re(tool)
+    rule_ignores: dict[int, set[str]] = {}
+    syntax_ignore_lines: set[int] = set()
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        match = pattern.search(line)
+        if not match:
+            continue
+        # Stop at a reason/comment delimiter so a reason mentioning a RULE-LIKE
+        # token isn't captured as a rule id.
+        raw = match.group(1)
+        head = _REASON_SPLIT_RE.split(raw, maxsplit=1)[0]
+        # Rule view (fail-closed; see scan_directives for the contract).
+        ids = set(_RULE_ID_RE.findall(head))
+        if ids:
+            rule_ignores[lineno] = ids
+        elif raw.strip() in ("", "*"):
+            rule_ignores[lineno] = {"*"}  # truly bare directive (or literal *): suppress all
+        else:
+            rule_ignores[lineno] = set()  # tokens written but none parsed -> suppress nothing
+        # Syntax view (see scan_syntax_ignores for the contract). NB deliberately
+        # judged on the pre-delimiter head, so `ignore reason: ...` / `ignore *
+        # reason: ...` keep their historical meanings in each view.
+        tokens = head.split()
+        if not tokens or head.strip() == "*" or any(token.lower() == "syntax" for token in tokens):
+            syntax_ignore_lines.add(lineno)
+    return DirectiveScan(rule_ignores=rule_ignores, syntax_ignore_lines=syntax_ignore_lines)
+
+
 def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
     """Map each 1-based line carrying a ``<tool>:ignore`` directive to the rule
     ids it silences.
@@ -62,25 +111,10 @@ def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
     rule-id shape (a typo'd / lowercase / un-hyphenated id like ``SQL001`` or
     ``sql-no-select-star``), the line gets an empty id set so that NOTHING is
     suppressed, rather than silently silencing everything.
+
+    A thin view over :func:`scan_all_directives` (the single directive grammar).
     """
-    pattern = _directive_re(tool)
-    out: dict[int, set[str]] = {}
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        match = pattern.search(line)
-        if not match:
-            continue
-        # Stop at a reason/comment delimiter so a reason mentioning a RULE-LIKE
-        # token isn't captured as a rule id.
-        raw = match.group(1)
-        head = _REASON_SPLIT_RE.split(raw, maxsplit=1)[0]
-        ids = set(_RULE_ID_RE.findall(head))
-        if ids:
-            out[lineno] = ids
-        elif raw.strip() in ("", "*"):
-            out[lineno] = {"*"}  # truly bare directive (or literal *): suppress all
-        else:
-            out[lineno] = set()  # tokens written but none parsed -> suppress nothing
-    return out
+    return scan_all_directives(text, tool).rule_ignores
 
 
 def is_inline_suppressed(rule_id: str, line: int, directives: dict[int, set[str]]) -> bool:
@@ -102,21 +136,11 @@ def scan_syntax_ignores(text: str, tool: str) -> set[int]:
     fires for an explicit lowercase ``syntax`` token (``<tool>:ignore syntax``) or
     a bare / ``*`` wildcard directive (which already silences everything on the
     line); a directive naming only rule ids does NOT silence a syntax diagnostic.
-    It shares the one cached :func:`_directive_re` and strips the ``reason:`` /
-    comment tail identically to :func:`scan_directives`, so the whole family has a
-    single directive grammar.
+    A thin view over :func:`scan_all_directives`, so it shares the one cached
+    :func:`_directive_re` and strips the ``reason:`` / comment tail identically to
+    :func:`scan_directives` — the whole family has a single directive grammar.
     """
-    pattern = _directive_re(tool)
-    out: set[int] = set()
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        match = pattern.search(line)
-        if not match:
-            continue
-        tail = _REASON_SPLIT_RE.split(match.group(1), maxsplit=1)[0]
-        tokens = tail.split()
-        if not tokens or tail.strip() == "*" or any(token.lower() == "syntax" for token in tokens):
-            out.add(lineno)
-    return out
+    return scan_all_directives(text, tool).syntax_ignore_lines
 
 
 def is_syntax_ignored(line: int, directive_lines: set[int]) -> bool:

@@ -177,3 +177,103 @@ def test_syntax_token_never_parses_as_a_rule_id_in_scan_directives():
     # rule-id shape — a bare-looking directive of only `syntax` suppresses no RULE.
     d = scan_directives("x  -- coop-sql-review:ignore syntax", "coop-sql-review")
     assert d.get(1) == set()  # tokens present but none is a rule id -> suppress nothing
+
+
+# --- single-pass scan_all_directives (issue #14) ------------------------------
+
+
+def _reference_scan_directives(text, tool):
+    """The pre-#14 two-loop implementation of scan_directives, kept verbatim as
+    the grammar's reference for the equivalence property test below."""
+    import re
+
+    from coop_review_core.suppressions import _directive_re, _REASON_SPLIT_RE  # noqa: PLC2701
+
+    rule_id_re = re.compile(r"[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+")
+    pattern = _directive_re(tool)
+    out = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        match = pattern.search(line)
+        if not match:
+            continue
+        raw = match.group(1)
+        head = _REASON_SPLIT_RE.split(raw, maxsplit=1)[0]
+        ids = set(rule_id_re.findall(head))
+        if ids:
+            out[lineno] = ids
+        elif raw.strip() in ("", "*"):
+            out[lineno] = {"*"}
+        else:
+            out[lineno] = set()
+    return out
+
+
+def _reference_scan_syntax_ignores(text, tool):
+    """The pre-#14 implementation of scan_syntax_ignores, kept verbatim."""
+    from coop_review_core.suppressions import _directive_re, _REASON_SPLIT_RE  # noqa: PLC2701
+
+    pattern = _directive_re(tool)
+    out = set()
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        match = pattern.search(line)
+        if not match:
+            continue
+        tail = _REASON_SPLIT_RE.split(match.group(1), maxsplit=1)[0]
+        tokens = tail.split()
+        if not tokens or tail.strip() == "*" or any(token.lower() == "syntax" for token in tokens):
+            out.add(lineno)
+    return out
+
+
+# Every directive-line shape the grammar knows about: ids, lists, `*`, bare,
+# `syntax`, mixed-case Reason: tails, every comment delimiter, non-parsing
+# tokens, prose mentioning rule-like ids, and non-directive lines.
+_DIRECTIVE_CORPUS = [
+    "SELECT 1",
+    "-- coop-sql-review:ignore",
+    "-- coop-sql-review:ignore *",
+    "-- coop-sql-review:ignore SQL-A",
+    "-- coop-sql-review:ignore SQL-A, SQL-B2",
+    "-- coop-sql-review:ignore SQL-A reason: legacy SQL-B",
+    "-- coop-sql-review:ignore SQL-A Reason: overlaps SQL-B",
+    "-- coop-sql-review:ignore SQL-A REASON: syntax is fine here",
+    "-- coop-sql-review:ignore * reason: everything accepted",
+    "-- coop-sql-review:ignore reason: no ids at all",
+    "-- coop-sql-review:ignore syntax",
+    "-- coop-sql-review:ignore SYNTAX reason: vendor DDL",
+    "-- coop-sql-review:ignore syntax SQL-A",
+    "-- coop-sql-review:ignore sql001",
+    "-- coop-sql-review:ignore sql-no-select-star",
+    "// coop-sql-review:ignore SQL-A -- trailing comment SQL-B",
+    "# coop-sql-review:ignore SQL-A # note SQL-B",
+    "-- COOP-SQL-REVIEW:IGNORE SQL-A",
+    "-- coop-sql-review : ignore SQL-A",
+    "-- xcoop-sql-review:ignore SQL-A",
+    "-- coop-dax-review:ignore DAX-A",
+    "   -- coop-sql-review:ignore\t SQL-A\t reason:\t tabs",
+]
+
+
+def test_scan_all_directives_wrappers_match_the_reference_line_for_line():
+    from coop_review_core.suppressions import scan_all_directives, scan_directives, scan_syntax_ignores
+
+    text = "\n".join(_DIRECTIVE_CORPUS) + "\n"
+    for tool in ("coop-sql-review", "coop-dax-review"):
+        expected_rules = _reference_scan_directives(text, tool)
+        expected_syntax = _reference_scan_syntax_ignores(text, tool)
+        assert scan_directives(text, tool) == expected_rules
+        assert scan_syntax_ignores(text, tool) == expected_syntax
+        scan = scan_all_directives(text, tool)
+        assert scan.rule_ignores == expected_rules
+        assert scan.syntax_ignore_lines == expected_syntax
+
+
+def test_scan_all_directives_is_a_frozen_snapshot():
+    import dataclasses
+
+    from coop_review_core.suppressions import scan_all_directives
+
+    scan = scan_all_directives("-- coop-sql-review:ignore SQL-A\n", "coop-sql-review")
+    assert dataclasses.is_dataclass(scan)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        scan.rule_ignores = {}
