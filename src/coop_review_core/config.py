@@ -361,7 +361,11 @@ def add_ignores(config_path: Path, entries: list[dict]) -> int:
     ``ignore:`` block. Each entry needs a ``fingerprint``; ``rule`` / ``where`` /
     ``note`` are optional context."""
     config_path = Path(config_path)
-    text = config_path.read_text(encoding="utf-8") if config_path.is_file() else ""
+    # utf-8-sig, like every loader: a BOM (e.g. from a PowerShell redirect) glued
+    # to a first-line `ignore:` key otherwise hides that line from both the
+    # duplicate-block guard and the splice anchor below, so a second top-level
+    # `ignore:` block gets appended. The write below stays BOM-less.
+    text = config_path.read_text(encoding="utf-8-sig") if config_path.is_file() else ""
     # Refuse to touch a file with two top-level `ignore:` keys (a merge conflict
     # or a hand-edit): YAML keeps only the last on load, so a blind rewrite would
     # silently drop the other block's entries. Fail safe — the user resolves it.

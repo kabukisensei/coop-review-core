@@ -102,6 +102,21 @@ def test_add_ignores_normalizes_crlf_input_to_lf(tmp_path):
     assert config.disabled == {"SQL-Z"} and config.ignored_fingerprints == {"x"}
 
 
+def test_add_ignores_round_trips_a_bom_prefixed_file(tmp_path):
+    # A PowerShell-redirected rules.yml carries a UTF-8 BOM. Every loader reads
+    # utf-8-sig; add_ignores must too — a BOM glued to a first-line `ignore:` key
+    # used to evade both the duplicate-block guard and the splice anchor, so a
+    # DUPLICATE top-level ignore: block was appended (and YAML then silently
+    # dropped one of them on load).
+    cfg = tmp_path / "rules.yml"
+    cfg.write_bytes(b"\xef\xbb\xbfignore:\n  - fingerprint: old1\n")
+    add_ignores(cfg, [{"fingerprint": "new1"}])
+    raw = cfg.read_bytes()
+    assert raw.count(b"ignore:") == 1  # spliced into the ONE existing block
+    assert not raw.startswith(b"\xef\xbb\xbf")  # writer stays BOM-less, like the loaders
+    assert RuleConfig.load(cfg).ignored_fingerprints == {"old1", "new1"}
+
+
 def test_add_ignores_quotes_numeric_looking_values(tmp_path):
     # Numeric-looking strings must stay strings: a bare emit would reload as an
     # int/float (and "007" would lose its leading zero), silently breaking the
