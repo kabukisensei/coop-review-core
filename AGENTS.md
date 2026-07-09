@@ -105,7 +105,9 @@ files depend on these — breaking any of them is NOT a minor release):
 - the baseline JSON shape `{"tool": ..., "fingerprints": [...]}`;
 - the rules.yml schema (`rules:` map with `enabled` / `severity` / `params`; top-level `ignore:` list);
 - `CoopReviewError` as the common base of `StandardsError` / `BaselineError` / `UpgradeError`
-  (consumers may catch it as "any core failure" — re-parenting any of the three off it is a break).
+  (consumers may catch it as "any core failure" — re-parenting any of the three off it is a break);
+- the family-wide **exit-code contract** (0 advisory / 1 friendly tool failure / 2 usage +
+  `--strict` / 130 interrupt — the table in "Exit-code contract" below).
 
 **Pin / deprecation policy** (issue #8; `__all__` in every module mirrors the public surface —
 anything underscore-prefixed or absent from `__all__` is private and may change without notice):
@@ -120,6 +122,29 @@ anything underscore-prefixed or absent from `__all__` is private and may change 
 - Consumers SHOULD additionally cap their pin going forward (`coop-review-core>=0.4,<0.5`) and
   bump the cap with each core release — belt-and-braces on top of the core-side rule, and it
   matches the documented core-first release train.
+
+## Exit-code contract (family-wide)
+
+Every `coop-*-review` CLI implements the same exit-code discipline (verified against both
+shipped linters' `cli.py`; core has no CLI, so this section is the canonical statement the tool
+repos reference instead of restating). **This table is part of the do-not-break list** —
+consumers' CI wrappers and agent harnesses route on these values:
+
+| Exit | Meaning |
+|---|---|
+| 0 | Success. Advisory by default — findings do NOT change the exit code unless the caller opts in with `--strict`. |
+| 1 | Tool failure surfaced as a friendly one-line `ClickException` — e.g. an unwritable output sink (`-o`, `--html`/`--md`/`--sarif`, `--log-file`, `--write-baseline`) or an unreadable standards file. Never a traceback. |
+| 2 | Usage error (bad flags, missing explicit `--config`, malformed rules.yml/baseline) — and the `--strict` trip: findings remain after the `--min-severity` floor, nothing was checked (zero files/models), or an error-severity diagnostic remains. |
+| 130 | Interrupted (Ctrl-C), via click's `Abort` and a raw `KeyboardInterrupt` alike. |
+
+Two clarifications:
+
+- 0-vs-2 is the advisory guarantee: findings never gate a build unless the caller opts in with
+  `--strict` — and `--strict` fails at 2, not 1, because a strict trip is a *policy* outcome
+  (the tool worked and found things), not a tool failure.
+- A sibling may document a narrow specialization, never a redefinition: `coop-data-doc`
+  documents exit 1 as "stale docs" for its check mode — a documented, opt-in gate — but no tool
+  may, e.g., return 1 for findings.
 
 ## Runbook
 
