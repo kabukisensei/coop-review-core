@@ -17,8 +17,11 @@ parameterizes the core with its own package name, tool name, and standards file.
 | `coop_review_core.diagnostics` | The `Diagnostic` model + processing-problem category constants. |
 | `coop_review_core.severity` | Severity ordering (`SEVERITIES`, `severity_rank`, `at_or_above`) + the stable, line-independent `fingerprint`. |
 | `coop_review_core.suppressions` | Inline `<tool>:ignore` directives + a fingerprint baseline (`scan_directives`, `is_inline_suppressed`, `write_baseline`, `load_baseline`). |
-| `coop_review_core.upgrade` | Self-update planning — the only networked part (`build_plan`, `upgrade_command`, `apply_plan`). |
-| `coop_review_core.config` | The `rules.yml` config layer + standards resolution (`RuleConfig`, `apply_config`, `resolve_standards_path`, `standards_info`). |
+| `coop_review_core.upgrade` | Self-update planning — the only networked part (`build_plan`, `upgrade_command`). |
+| `coop_review_core.config` | The `rules.yml` config layer with unified discovery (`RuleConfig`, `apply_config`, `discover_config`) + standards resolution (`resolve_standards_path`, `standards_info`). |
+| `coop_review_core.cliutils` | Shared CLI helpers (`display_path`, `config_write_path`, `write_extra_report`, `run_upgrade` + `with_upgrade_options`). |
+| `coop_review_core.report` | Shared report chrome — console badges/ANSI + the branded HTML style — plus the machine-JSON envelope, the SARIF 2.1.0 emitter (`to_sarif`), and the single bundled Cooptimize logo (`logo_data_uri`). |
+| `coop_review_core.errors` | `CoopReviewError`, the common base of every user-facing error core raises. |
 
 Everything is **deterministic and offline** except `upgrade` (PyPI metadata / `git fetch`), and
 nothing here ever blocks a build.

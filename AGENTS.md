@@ -62,7 +62,7 @@ commit it.
 | `diagnostics.py` | the `Diagnostic` model + category constants for *processing* problems (parse failures, rule crashes, stale baseline/ignore entries) so nothing fails silently. |
 | `severity.py` | severity ordering (`SEVERITIES`, `severity_rank`, `at_or_above`) + `fingerprint(*parts)` — the stable, line-independent 12-hex-char finding id. |
 | `suppressions.py` | inline `<tool>:ignore` directives (`scan_directives`, `is_inline_suppressed`; fail-closed on malformed rule ids) + the JSON fingerprint baseline (`write_baseline`, `load_baseline`). |
-| `upgrade.py` | self-update planning/applying (`build_plan`, `upgrade_command`, `apply_plan`). The ONLY networked module (PyPI JSON, `git fetch`); network/subprocess collaborators are injectable so tests stay offline. |
+| `upgrade.py` | self-update planning (`build_plan`, `upgrade_command`). The ONLY networked module (PyPI JSON, `git fetch`); network/subprocess collaborators are injectable so tests stay offline. |
 | `config.py` | the rules.yml layer (`RuleConfig`, `apply_config`, the `ignore:` finding list + its `add_ignores` writer) and standards resolution (`resolve_standards_path`, `standards_info`, `StandardsError`). |
 | `cliutils.py` | the shared CLI helper layer (issue #10): `display_path`, `stdio_interactive`, `use_color`, `config_write_path` (the write-back-to-what-was-read rule; never inside the package), `apply_syntax_error_policy`, `write_extra_report`, `should_open_report`, `force_utf8_console`, `run_upgrade` + `with_upgrade_options`. Imports `upgrade.py` lazily, so a linter's `check` path stays offline-import-clean. |
 | `report.py` | the shared report layer (issue #9): console chrome (`BADGE`/`BADGE_COLOR`/`ANSI`/`sty`), the branded `HTML_STYLE` + `logo_data_uri` (the ONE bundled `data/cooptimize-logo.png`), `esc`/`chip`, and the machine-JSON envelope (`verdict`, `build_envelope`, `envelope_text`, `diagnostic_json`, `log_text`). Renders from plain data — never a tool's `Result`. |
@@ -113,12 +113,14 @@ files depend on these — breaking any of them is NOT a minor release):
 anything underscore-prefixed or absent from `__all__` is private and may change without notice):
 
 - Core **never removes or breaks a public name that a shipped consumer wheel imports at module
-  load** while uncapped `>=` pins on it exist. Both published linters pin `coop-review-core>=X`
-  uncapped and import (e.g.) `apply_plan` at import time — removing such a name would break every
+  load** while uncapped `>=` pins on it exist — removing such a name would break every
   already-installed consumer wheel on its next `pip install -U coop-review-core`. Removal
-  requires a **major** core version AND a released generation of every consumer that no longer
-  imports the name; until then a deprecated name stays importable (`apply_plan` is the standing
-  example).
+  requires a **breaking** core release AND a released generation of every consumer that no
+  longer imports the name, behind a cap that excludes the removing release; until then a
+  deprecated name stays importable. `apply_plan` was the standing example: dead once both
+  linters went print-only (`upgrade_command`), removed for 0.5.0 (issue #5) — safe because
+  the shipped generations pin `>=0.4,<0.5`, and each linter drops its re-import before
+  raising that cap.
 - Consumers SHOULD additionally cap their pin going forward (`coop-review-core>=0.4,<0.5`) and
   bump the cap with each core release — belt-and-braces on top of the core-side rule, and it
   matches the documented core-first release train.
@@ -232,6 +234,9 @@ strands that venv off the released version and breaks the consumer's bare
   (2) build sdist+wheel and smoke-test the wheel in a fresh venv; (3) publish to
   PyPI via trusted publishing (GitHub OIDC through the `pypi` environment — no
   PyPI token exists anywhere); (4) create the GitHub Release with generated notes.
+- A feature change must update this repo's own docs (README.md / AGENTS.md) in
+  the same change — the README's module table went a full release stale (it
+  missed every 0.4.0 addition) because nothing enforced this.
 
 Release steps, in order:
 

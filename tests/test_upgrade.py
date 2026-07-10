@@ -1,13 +1,10 @@
 """Self-update logic (no network): classification + the per-install-method command shapes."""
 
-import subprocess
 from pathlib import Path
 
 from coop_review_core import upgrade as upmod
 from coop_review_core.upgrade import (
-    DependencyStatus,
     UpgradePlan,
-    apply_plan,
     build_plan,
     classify_update,
     detect_install_method,
@@ -18,14 +15,6 @@ from coop_review_core.upgrade import (
 )
 
 NAME = "coop-x-review"
-
-
-def _recording_runner(record):
-    def runner(cmd, **_kwargs):
-        record.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    return runner
 
 
 def _plan(method, *, checkout=None, pip_spec=None, tool_note="note", needs_pull=False) -> UpgradePlan:
@@ -150,36 +139,6 @@ def test_build_plan_offline_with_injected_collaborators():
     assert plan.package_name == NAME
     assert plan.tool_installed == "0.1.0"
     assert "latest release is 0.2.0" in plan.tool_note  # newer release detected
-
-
-# -- apply_plan (the executing path; tools print instead, but it's public core API) ----------
-
-
-def test_apply_plan_pipx_pypi_uses_upgrade():
-    record = []
-    apply_plan(_plan("pipx"), runner=_recording_runner(record))
-    assert record[0][:2] == ["pipx", "upgrade"]
-
-
-def test_apply_plan_pipx_vcs_uses_reinstall_not_force():
-    record = []
-    apply_plan(_plan("pipx", pip_spec="git+https://e/x.git@main"), runner=_recording_runner(record))
-    assert record[0][:2] == ["pipx", "reinstall"]
-
-
-def test_apply_plan_pip_url_force_reinstalls():
-    record = []
-    apply_plan(_plan("pip", pip_spec="git+https://e/x.git"), runner=_recording_runner(record))
-    assert "--force-reinstall" in record[0]
-
-
-def test_apply_plan_pip_safe_dependency_bump_pins_below_next_major():
-    record = []
-    plan = _plan("pip")
-    plan.dependencies.append(DependencyStatus("widget", "1.0.0", "1.2.0", "safe"))
-    apply_plan(plan, runner=_recording_runner(record))
-    # second command bumps the safe dep, pinned below its next major (1.x -> <2)
-    assert any("widget<2" in tok for tok in record[1])
 
 
 # -- install detection / origin (newly parameterized by package_name) ------------------------

@@ -6,9 +6,9 @@ guarantee is untouched.
 
 Tool-agnostic: pass the package name and the running version into
 :func:`build_plan`; the resulting :class:`UpgradePlan` carries the package name
-so :func:`upgrade_command` / :func:`apply_plan` need no globals. Pure logic
-(classification, planning) is separated from side effects (network fetcher and
-subprocess runner are injectable) so tests never need the network.
+so :func:`upgrade_command` needs no globals. Pure logic (classification,
+planning) is separated from side effects (network fetcher and subprocess runner
+are injectable) so tests never need the network.
 """
 
 from __future__ import annotations
@@ -40,7 +40,6 @@ __all__ = [
     "fetch_latest_version",
     "build_plan",
     "upgrade_command",
-    "apply_plan",
 ]
 
 PYPI_JSON_URL = "https://pypi.org/pypi/{name}/json"
@@ -221,23 +220,15 @@ def fetch_latest_version(name: str) -> str | None:
         return None
 
 
-def _run(command: list[str], runner=subprocess.run) -> subprocess.CompletedProcess:
-    completed = runner(command, capture_output=True, text=True)
-    if completed.returncode != 0:
-        tail = "\n".join((completed.stderr or "").splitlines()[-5:])
-        raise UpgradeError(f"`{' '.join(command)}` failed:\n{tail}")
-    return completed
-
-
-# -- planning & applying -------------------------------------------------------
+# -- planning ------------------------------------------------------------------
 
 
 def _git_checkout_note(checkout: Path, runner=subprocess.run) -> tuple[str, bool]:
     """Return (display note, needs_pull) for a git-checkout install.
 
     ``needs_pull`` is the structured control signal consumed by
-    :func:`upgrade_command` / :func:`apply_plan`; the note is display-only, so
-    rewording it can't silently disable the pull step.
+    :func:`upgrade_command`; the note is display-only, so rewording it can't
+    silently disable the pull step.
     """
     has_upstream = (
         runner(
@@ -331,10 +322,10 @@ def upgrade_command(plan: UpgradePlan) -> list[list[str]]:
 
     ``upgrade``/``update`` print these rather than executing them: a running
     program can't reliably replace its own files (on Windows its console-script
-    .exe is locked), so the user runs them in a fresh terminal. Mirrors what
-    ``apply_plan`` would run, but with display-friendly tokens (``python`` rather
-    than this interpreter's absolute path). Most install methods need a single
-    command; a git checkout may need two (pull, then reinstall).
+    .exe is locked), so the user runs them in a fresh terminal. Commands use
+    display-friendly tokens (``python`` rather than this interpreter's absolute
+    path). Most install methods need a single command; a git checkout may need
+    two (pull, then reinstall).
     """
     name = plan.package_name
     if plan.install_method == "pipx":
@@ -358,53 +349,3 @@ def upgrade_command(plan: UpgradePlan) -> list[list[str]]:
         spec_tokens = ["-e", plan.pip_spec[3:]] if plan.pip_spec.startswith("-e ") else [plan.pip_spec]
         return [["python", "-m", "pip", "install", "-U", "--force-reinstall", *spec_tokens]]
     return [["python", "-m", "pip", "install", "-U", name]]
-
-
-def apply_plan(plan: UpgradePlan, runner=subprocess.run) -> list[list[str]]:
-    """Run the upgrade: the tool first, then non-breaking dependency bumps.
-
-    Major dependency upgrades are never applied automatically — they are
-    reported so a human can review release notes first.
-
-    .. deprecated::
-        No shipping linter self-applies anymore — both coop-sql-review and
-        coop-dax-review only *print* the command from :func:`upgrade_command` and
-        let the user run it (a running program can't reliably replace its own
-        files, esp. a locked ``.exe`` on Windows). ``apply_plan`` is retained as
-        tested library API for any out-of-tree caller, but new code should prefer
-        :func:`upgrade_command`. It may be removed in a future major release.
-    """
-    name = plan.package_name
-    executed: list[list[str]] = []
-
-    if plan.install_method == "pipx":
-        # `pipx reinstall` (NOT `install --force`): re-pulls the recorded spec,
-        # preserves the pinned @ref, and works under pipx's uv backend.
-        command = ["pipx", "reinstall", name] if plan.is_vcs_install else ["pipx", "upgrade", name]
-    elif plan.install_method == "uv-tool":
-        command = (
-            ["uv", "tool", "install", "--force", plan.pip_spec]
-            if plan.is_vcs_install
-            else ["uv", "tool", "upgrade", name]
-        )
-    elif plan.install_method == "git-checkout" and plan.checkout is not None:
-        if plan.needs_pull:
-            pull = ["git", "-C", str(plan.checkout), "pull", "--ff-only"]
-            _run(pull, runner)
-            executed.append(pull)
-        command = [sys.executable, "-m", "pip", "install", "-q", "-U", str(plan.checkout)]
-    elif plan.pip_spec:
-        spec_tokens = ["-e", plan.pip_spec[3:]] if plan.pip_spec.startswith("-e ") else [plan.pip_spec]
-        command = [sys.executable, "-m", "pip", "install", "-q", "-U", "--force-reinstall", *spec_tokens]
-    else:
-        command = [sys.executable, "-m", "pip", "install", "-q", "-U", name]
-    _run(command, runner)
-    executed.append(command)
-
-    if plan.install_method in ("pip", "git-checkout") and plan.safe_updates:
-        specs = [f"{dep.name}<{(_major(dep.latest) or 0) + 1}" for dep in plan.safe_updates]
-        dep_command = [sys.executable, "-m", "pip", "install", "-q", "-U", *specs]
-        _run(dep_command, runner)
-        executed.append(dep_command)
-
-    return executed

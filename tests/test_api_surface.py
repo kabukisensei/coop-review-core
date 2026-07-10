@@ -76,7 +76,6 @@ def test_all_mirrors_the_do_not_break_list():
             "is_vcs_spec",
             "build_plan",
             "upgrade_command",
-            "apply_plan",  # deprecated but imported by shipped consumer wheels at module load
         },
         "coop_review_core.config": {
             "RuleConfig",
