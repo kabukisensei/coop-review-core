@@ -166,6 +166,36 @@ def test_pip_install_origin_parses_editable(monkeypatch):
     assert pip_install_origin("pkg") == "-e /home/u/proj"
 
 
+def test_pip_install_origin_editable_decodes_percent_encoded_path(monkeypatch):
+    # PEP 610 file URLs are percent-encoded, so a checkout path with a space
+    # arrives as `%20`. Slicing off `file://` used to leave the literal `%20`
+    # in the printed `-e` command, pointing at a nonexistent directory. It must
+    # be url-decoded to a real filesystem path.
+    class _Dist:
+        def read_text(self, _name):
+            return '{"url":"file:///home/u/My%20Projects/pkg","dir_info":{"editable":true}}'
+
+    monkeypatch.setattr(upmod.metadata, "distribution", lambda _n: _Dist())
+    assert pip_install_origin("pkg") == "-e /home/u/My Projects/pkg"
+
+
+def test_pip_install_origin_editable_windows_url_converts_to_drive_path():
+    # On Windows the PEP 610 file URL uses the `/C:/...` form; slicing off
+    # `file://` yielded `-e /C:/Users/...`, which pip can't resolve. The
+    # URL-splitting + nturl2path path (exercised directly, so the assertion is
+    # platform-independent) must produce a real `C:\...` drive path.
+    import urllib.parse
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # nturl2path deprecated 3.19+
+        import nturl2path
+
+    url = "file:///C:/Users/u/My%20Proj/pkg"
+    converted = nturl2path.url2pathname(urllib.parse.urlsplit(url).path)
+    assert converted == r"C:\Users\u\My Proj\pkg"
+
+
 def test_pip_install_origin_none_for_plain_pypi(monkeypatch):
     class _Dist:
         def read_text(self, _name):

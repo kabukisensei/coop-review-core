@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from importlib import metadata
@@ -177,7 +178,14 @@ def pip_install_origin(package_name: str) -> str | None:
         spec = f"{vcs.get('vcs', 'git')}+{url}"
         return f"{spec}@{ref}" if ref else spec  # keep the pinned branch/ref
     if info.get("dir_info", {}).get("editable"):
-        return f"-e {url[len('file://') :] if url.startswith('file://') else url}"
+        # PEP 610 file URLs are percent-encoded and use the `/C:/...` form on
+        # Windows, so slicing off `file://` would emit `-e /C:/Users/...` (pip
+        # can't resolve that as a path) and leave `%20` literals for paths with
+        # spaces. url2pathname unquotes on POSIX and converts `/C:/...` to
+        # `C:\...` on Windows (via nturl2path), yielding a real filesystem path.
+        if url.startswith("file:"):
+            return f"-e {urllib.request.url2pathname(urllib.parse.urlsplit(url).path)}"
+        return f"-e {url}"
     return url  # local directory or a direct archive URL
 
 
