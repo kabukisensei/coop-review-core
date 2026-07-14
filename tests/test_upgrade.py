@@ -4,6 +4,7 @@ from pathlib import Path
 
 from coop_review_core import upgrade as upmod
 from coop_review_core.upgrade import (
+    DependencyStatus,
     UpgradePlan,
     build_plan,
     classify_update,
@@ -12,6 +13,9 @@ from coop_review_core.upgrade import (
     is_vcs_spec,
     pip_install_origin,
     upgrade_command,
+)
+from coop_review_core.upgrade import (
+    _git_checkout_note,  # private, but the ONLY producer of needs_pull=True
 )
 
 NAME = "coop-x-review"
@@ -185,3 +189,126 @@ def test_detect_install_method_finds_git_checkout(tmp_path, monkeypatch):
     method, checkout = detect_install_method("mypkg")
     assert method == "git-checkout"
     assert (checkout / "pyproject.toml").exists()
+
+
+def test_detect_install_method_pipx_and_uv_tool(monkeypatch):
+    # The pipx / uv-tool prefix-detection branches: sys.prefix living under a
+    # pipx venv or uv tool dir classifies without touching pyproject/git.
+    monkeypatch.setattr(upmod.sys, "prefix", "/home/u/.local/pipx/venvs/coop-x-review")
+    assert detect_install_method("coop-x-review") == ("pipx", None)
+    monkeypatch.setattr(upmod.sys, "prefix", "/home/u/.local/share/uv/tools/coop-x-review")
+    assert detect_install_method("coop-x-review") == ("uv-tool", None)
+
+
+# -- _git_checkout_note: the only producer of needs_pull, exercised with a fake runner ---------
+
+
+class _Result:
+    """Stand-in for a subprocess.CompletedProcess (only the fields the code reads)."""
+
+    def __init__(self, returncode=0, stdout=""):
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _scripted_runner(*results):
+    """A fake subprocess runner returning the given _Result objects in call order,
+    recording each invoked git subcommand for assertions."""
+    calls: list[str] = []
+    queue = list(results)
+
+    def runner(argv, **_kwargs):
+        # argv is ["git", "-C", <checkout>, <subcommand>, ...]; record the subcommand.
+        calls.append(argv[3])
+        return queue.pop(0)
+
+    runner.calls = calls
+    return runner
+
+
+def test_git_checkout_note_no_upstream():
+    # rev-parse @{upstream} fails -> no upstream; never fetches, needs_pull False.
+    runner = _scripted_runner(_Result(returncode=1))
+    note, needs_pull = _git_checkout_note(Path("/repo"), runner)
+    assert needs_pull is False
+    assert "no upstream" in note
+    assert runner.calls == ["rev-parse"]  # short-circuits before fetch
+
+
+def test_git_checkout_note_fetch_failed():
+    # upstream exists but `git fetch` fails (offline) -> needs_pull False.
+    runner = _scripted_runner(_Result(returncode=0), _Result(returncode=1))
+    note, needs_pull = _git_checkout_note(Path("/repo"), runner)
+    assert needs_pull is False
+    assert "fetch" in note
+    assert runner.calls == ["rev-parse", "fetch"]  # stops before rev-list
+
+
+def test_git_checkout_note_behind_sets_needs_pull():
+    # rev-list count > 0 -> the ONLY path that sets needs_pull=True.
+    runner = _scripted_runner(_Result(0), _Result(0), _Result(0, stdout="2\n"))
+    note, needs_pull = _git_checkout_note(Path("/repo"), runner)
+    assert needs_pull is True
+    assert "2 new commit(s)" in note
+    assert runner.calls == ["rev-parse", "fetch", "rev-list"]
+
+
+def test_git_checkout_note_up_to_date():
+    # rev-list count 0 -> up to date, needs_pull False.
+    runner = _scripted_runner(_Result(0), _Result(0), _Result(0, stdout="0\n"))
+    note, needs_pull = _git_checkout_note(Path("/repo"), runner)
+    assert needs_pull is False
+    assert "up to date" in note
+
+
+# -- build_plan: git-checkout / VCS / dependency-loop branches ---------------------------------
+
+
+def test_build_plan_git_checkout_flows_needs_pull_through(tmp_path, monkeypatch):
+    # A git-checkout install with an upstream that is ahead must set the plan's
+    # needs_pull, driven by the injected runner (no real git).
+    monkeypatch.setattr(upmod, "detect_install_method", lambda _pkg: ("git-checkout", tmp_path))
+    runner = _scripted_runner(_Result(0), _Result(0), _Result(0, stdout="3\n"))
+    plan = build_plan(NAME, "0.1.0", runner=runner, origin=lambda _p: None)
+    assert plan.install_method == "git-checkout"
+    assert plan.needs_pull is True
+    assert "3 new commit(s)" in plan.tool_note
+
+
+def test_build_plan_vcs_spec_note(monkeypatch):
+    # A non-git-checkout install whose origin is a git+ spec re-pulls the latest commit.
+    monkeypatch.setattr(upmod, "detect_install_method", lambda _pkg: ("pip", None))
+    plan = build_plan(NAME, "0.1.0", origin=lambda _p: "git+https://e/x.git@main")
+    assert plan.needs_pull is False
+    assert "re-pulls the latest commit" in plan.tool_note
+
+
+def test_build_plan_fetch_none_note(monkeypatch):
+    # A plain-PyPI install whose fetch returns None reports the could-not-determine note.
+    monkeypatch.setattr(upmod, "detect_install_method", lambda _pkg: ("pip", None))
+    plan = build_plan(NAME, "0.1.0", fetch=lambda _n: None, origin=lambda _p: None)
+    assert "could not determine the latest release" in plan.tool_note
+
+
+def test_build_plan_dependency_loop_uses_injected_collaborators(monkeypatch):
+    # The dependency loop: one dep is installed, one raises PackageNotFoundError and
+    # is skipped -> exactly one DependencyStatus carrying the injected fetch's latest.
+    monkeypatch.setattr(upmod, "detect_install_method", lambda _pkg: ("pip", None))
+    monkeypatch.setattr(upmod, "direct_dependencies", lambda _pkg: ["click", "ghost"])
+
+    def _installed(name):
+        if name == "ghost":
+            raise upmod.metadata.PackageNotFoundError(name)
+        return "8.1.0"
+
+    plan = build_plan(
+        NAME,
+        "0.1.0",
+        fetch=lambda name: "9.0.0" if name != NAME else None,
+        installed_version_of=_installed,
+        origin=lambda _p: None,
+    )
+    assert len(plan.dependencies) == 1
+    dep = plan.dependencies[0]
+    assert isinstance(dep, DependencyStatus)
+    assert (dep.name, dep.installed, dep.latest, dep.kind) == ("click", "8.1.0", "9.0.0", "major")
