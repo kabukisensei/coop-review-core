@@ -68,10 +68,14 @@ commit it.
 | `report.py` | the shared report layer (issue #9): console chrome (`BADGE`/`BADGE_COLOR`/`ANSI`/`sty`), the branded `HTML_STYLE` + `logo_data_uri` (the ONE bundled `data/cooptimize-logo.png`), `esc`/`chip`, and the machine-JSON envelope (`verdict`, `build_envelope`, `envelope_text`, `diagnostic_json`, `log_text`). Renders from plain data — never a tool's `Result`. |
 | `data/` | package data shipped in the wheel: `cooptimize-logo.png` (the family's single logo copy). |
 
-`tests/` roughly mirrors the modules (`test_config.py`, `test_diagnostics.py`,
-`test_ignores.py`, `test_severity.py`, `test_suppressions.py`, `test_upgrade.py`) —
-not one-to-one: `progress.py` has no dedicated test file, and `test_ignores.py`
-covers `config.py`'s `ignore:` list rather than a module named `ignores`.
+`tests/` roughly mirrors the modules (`test_cliutils.py`, `test_config.py`,
+`test_diagnostics.py`, `test_discover_config.py`, `test_ignores.py`,
+`test_progress.py`, `test_report.py`, `test_severity.py`, `test_suppressions.py`,
+`test_upgrade.py`) — but not one-to-one: `test_ignores.py` and
+`test_discover_config.py` both cover parts of `config.py` (the `ignore:` list and
+config discovery) rather than modules of those names, and `test_api_surface.py`
+audits `__all__` / the do-not-break surface across the package rather than a
+single module.
 
 ## Parameterization contract — what a downstream linter supplies
 
