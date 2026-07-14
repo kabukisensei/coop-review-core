@@ -1,6 +1,9 @@
 """Self-update logic (no network): classification + the per-install-method command shapes."""
 
+import sys
 from pathlib import Path
+
+import pytest
 
 from coop_review_core import upgrade as upmod
 from coop_review_core.upgrade import (
@@ -157,6 +160,11 @@ def test_pip_install_origin_parses_vcs(monkeypatch):
     assert pip_install_origin("pkg") == "git+https://e/x.git@main"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX file:// path localization; url2pathname yields native \\ separators on "
+    "Windows. The Windows /C:/ form is covered by test_..._windows_url_converts_to_drive_path.",
+)
 def test_pip_install_origin_parses_editable(monkeypatch):
     class _Dist:
         def read_text(self, _name):
@@ -166,6 +174,11 @@ def test_pip_install_origin_parses_editable(monkeypatch):
     assert pip_install_origin("pkg") == "-e /home/u/proj"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX file:// path localization; url2pathname yields native \\ separators on "
+    "Windows. The Windows /C:/ form is covered by test_..._windows_url_converts_to_drive_path.",
+)
 def test_pip_install_origin_editable_decodes_percent_encoded_path(monkeypatch):
     # PEP 610 file URLs are percent-encoded, so a checkout path with a space
     # arrives as `%20`. Slicing off `file://` used to leave the literal `%20`
