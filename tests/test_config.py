@@ -157,6 +157,21 @@ def test_rule_config_loads_from_text():
     assert RuleConfig.loads("   \n") == RuleConfig()
 
 
+def test_rule_config_loads_is_lenient_on_non_mapping_rules_and_settings():
+    from coop_review_core.config import RuleConfig
+
+    # The documented "lenient on shape" contract: a non-mapping `rules:` (a list
+    # or a scalar) is treated as empty, not a raw AttributeError. load() inherits
+    # this via loads(), and both are public API.
+    assert RuleConfig.loads("rules:\n  - SQL-A\n") == RuleConfig()  # rules: as a list
+    assert RuleConfig.loads("rules: SQL-A\n") == RuleConfig()  # rules: as a scalar
+    # A non-mapping per-rule settings value (an easy hand-edit) is empty-behavior,
+    # but the id still lands in `configured` so unknown-rule reporting still sees it.
+    cfg = RuleConfig.loads("rules:\n  SQL-A: enabled\n")
+    assert cfg.disabled == set() and cfg.enabled == set()
+    assert cfg.configured == {"SQL-A"}
+
+
 def test_load_config_friendly_returns_config_and_raw_mapping(tmp_path):
     from coop_review_core.config import load_config_friendly
 
@@ -189,6 +204,21 @@ def test_load_config_friendly_reports_each_problem(tmp_path):
     _bad("a: b: c\n- x", "invalid YAML")
     _bad("rules:\n  A-B:\n    severity: loud\n", "invalid severity")
     _bad(b"\xff\xfer\x00u\x00", "not UTF-8", raw=True)  # UTF-16-ish / NUL-riddled
+    # A non-mapping per-rule settings value (`SQL-A: enabled`) is flagged
+    # explicitly by the friendly loader, not silently ignored — even though
+    # _from_data itself is now lenient on that shape for load/loads.
+    _bad("rules:\n  A-B: enabled\n", r"must map to a settings block")
+
+
+def test_load_config_friendly_accepts_null_rule_settings(tmp_path):
+    # A rule id with an empty (null) settings block is a valid "mention it, no
+    # override" shape — it must NOT trip the settings-shape check.
+    from coop_review_core.config import load_config_friendly
+
+    p = tmp_path / "rules.yml"
+    p.write_text("rules:\n  A-B:\n", encoding="utf-8")
+    cfg, _raw = load_config_friendly(p)
+    assert cfg.configured == {"A-B"} and cfg.disabled == set()
 
 
 def test_parse_syntax_errors_knob():

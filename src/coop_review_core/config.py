@@ -242,17 +242,25 @@ class RuleConfig:
         and :func:`load_config_friendly`; lenient on shape by design (the friendly
         loader does the strict shape validation before calling this)."""
         rules = data.get("rules", {}) if isinstance(data, dict) else {}
+        # Make the "lenient on shape" contract real for load/loads: a non-mapping
+        # `rules:` (a list, or a scalar) is treated as empty rather than crashing
+        # `.items()` with a raw AttributeError. The friendly loader still does its
+        # own strict up-front `rules:`-must-be-a-mapping check before calling here.
+        rules = rules if isinstance(rules, dict) else {}
         disabled: set[str] = set()
         enabled: set[str] = set()
         overrides: dict[str, str] = {}
         params: dict[str, dict] = {}
-        for raw_id, settings in (rules or {}).items():
+        for raw_id, settings in rules.items():
             # YAML parses an unquoted numeric key (`123:`) as an int (and `on:`
             # as a bool, etc.). Coerce every rule id to str so the disabled/
             # enabled/overrides/params keys stay homogeneous and
             # unknown_rule_ids' sorted() can't raise a raw TypeError.
             rule_id = str(raw_id)
-            settings = settings or {}
+            # A non-mapping settings value (`SQL-A: enabled` — an easy hand-edit)
+            # is treated as empty so `.get(...)` can't crash. The friendly loader
+            # flags that shape explicitly (below) rather than silently ignoring it.
+            settings = settings if isinstance(settings, dict) else {}
             if settings.get("enabled") is False:
                 disabled.add(rule_id)
             elif settings.get("enabled") is True:
@@ -276,7 +284,7 @@ class RuleConfig:
             enabled=enabled,
             severity_overrides=overrides,
             params=params,
-            configured={str(rule_id) for rule_id in (rules or {})},
+            configured={str(rule_id) for rule_id in rules},
             ignored_fingerprints={e["fingerprint"] for e in _read_ignore_entries(ignore_section)},
         )
 
@@ -295,6 +303,9 @@ SYNTAX_ERROR_MODES = ("error", "warning", "off")
 _MSG_NOT_UTF8 = "the file is not UTF-8 - re-save it as UTF-8 (PowerShell '>' writes UTF-16)"
 _MSG_TOP_LEVEL = "the top level must be a mapping (e.g. a `rules:` section)"
 _MSG_RULES_MAPPING = "`rules:` must be a mapping of rule ids to settings, not a list"
+_MSG_RULE_SETTINGS = (
+    "rule '{rule_id}' must map to a settings block (e.g. `enabled: false`), not a bare `{value!r}`"
+)
 
 
 def parse_syntax_errors_knob(raw: object, modes: tuple[str, ...] = SYNTAX_ERROR_MODES) -> str:
@@ -344,6 +355,14 @@ def load_config_friendly(path: Path | None) -> tuple[RuleConfig, dict]:
         raise StandardsError(_MSG_TOP_LEVEL)
     if isinstance(data, dict) and data.get("rules") is not None and not isinstance(data["rules"], dict):
         raise StandardsError(_MSG_RULES_MAPPING)
+    if isinstance(data, dict) and isinstance(data.get("rules"), dict):
+        # _from_data is now lenient on a non-mapping per-rule settings value (so
+        # load/loads match their docstring), which would let a hand-edit like
+        # `SQL-A: enabled` slip through silently. The friendly loader still flags
+        # it explicitly so a CLI user learns the value was ignored.
+        for rule_id, settings in data["rules"].items():
+            if settings is not None and not isinstance(settings, dict):
+                raise StandardsError(_MSG_RULE_SETTINGS.format(rule_id=rule_id, value=settings))
     try:
         config = RuleConfig._from_data(data)
     except StandardsError:
