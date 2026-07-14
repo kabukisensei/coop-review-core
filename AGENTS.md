@@ -57,7 +57,7 @@ commit it.
 | Module | Responsibility |
 |---|---|
 | `__init__.py` | package docstring + `__version__` — the single version source (see Release) — and the `CoopReviewError` re-export. |
-| `errors.py` | `CoopReviewError`, the common base of every user-facing error core raises (`StandardsError`, `BaselineError`, `UpgradeError` all subclass it). |
+| `errors.py` | `CoopReviewError`, the common base of every user-facing error core raises (`StandardsError`, `BaselineError`, `UpgradeError`, `DeltaError` all subclass it). |
 | `progress.py` | stderr-only, TTY-gated scan progress (`Progress`, `should_enable`, `Tick`); a cheap no-op when quiet, piped, or in CI. |
 | `diagnostics.py` | the `Diagnostic` model + category constants for *processing* problems (parse failures, rule crashes, stale baseline/ignore entries) so nothing fails silently. |
 | `severity.py` | severity ordering (`SEVERITIES`, `severity_rank`, `at_or_above`) + `fingerprint(*parts)` — the stable, line-independent 12-hex-char finding id. |
@@ -66,12 +66,13 @@ commit it.
 | `config.py` | the rules.yml layer (`RuleConfig`, `apply_config`, the `ignore:` finding list + its `add_ignores` writer) and standards resolution (`resolve_standards_path`, `standards_info`, `StandardsError`). |
 | `cliutils.py` | the shared CLI helper layer (issue #10): `display_path`, `stdio_interactive`, `use_color`, `config_write_path` (the write-back-to-what-was-read rule; never inside the package), `apply_syntax_error_policy`, `write_extra_report`, `should_open_report`, `force_utf8_console`, `run_upgrade` + `with_upgrade_options`. Imports `upgrade.py` lazily, so a linter's `check` path stays offline-import-clean. |
 | `report.py` | the shared report layer (issue #9): console chrome (`BADGE`/`BADGE_COLOR`/`ANSI`/`sty`), the branded `HTML_STYLE` + `logo_data_uri` (the ONE bundled `data/cooptimize-logo.png`), `esc`/`chip`, the machine-JSON envelope (`verdict`, `build_envelope`, `envelope_text`, `diagnostic_json`, `log_text`), and the SARIF 2.1.0 emitter (`to_sarif`, `sarif_location`, `SARIF_LEVEL`, `SARIF_FINGERPRINT_KEY`). Renders from plain data — never a tool's `Result`. |
+| `delta.py` | run-to-run envelope comparison (issue #29): `diff_envelopes` keys two same-tool envelopes on each finding's `fingerprint` into an `EnvelopeDelta` (new / fixed / persisting + per-severity `summary` deltas + a standards-change flag), with deterministic `delta_text` / `delta_markdown` renderers. `DeltaError` on a cross-tool compare. Consumers add a `--diff-against` flag on top. |
 | `data/` | package data shipped in the wheel: `cooptimize-logo.png` (the family's single logo copy). |
 
 `tests/` roughly mirrors the modules (`test_cliutils.py`, `test_config.py`,
-`test_diagnostics.py`, `test_discover_config.py`, `test_ignores.py`,
-`test_progress.py`, `test_report.py`, `test_severity.py`, `test_suppressions.py`,
-`test_upgrade.py`) — but not one-to-one: `test_ignores.py` and
+`test_delta.py`, `test_diagnostics.py`, `test_discover_config.py`,
+`test_ignores.py`, `test_progress.py`, `test_report.py`, `test_severity.py`,
+`test_suppressions.py`, `test_upgrade.py`) — but not one-to-one: `test_ignores.py` and
 `test_discover_config.py` both cover parts of `config.py` (the `ignore:` list and
 config discovery) rather than modules of those names, and `test_api_surface.py`
 audits `__all__` / the do-not-break surface across the package rather than a

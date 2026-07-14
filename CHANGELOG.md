@@ -4,6 +4,18 @@ All notable changes to **coop-review-core** are documented here. The format foll
 [Keep a Changelog](https://keepachangelog.com/), and the project uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added
+- `coop_review_core.delta`: run-to-run comparison of two review envelopes (issue #29).
+  `diff_envelopes(old, new)` keys two same-tool envelopes on each finding's
+  line-independent `fingerprint` and returns an `EnvelopeDelta` — `new_findings`,
+  `fixed_findings` (whole finding dicts, for display), a `persisting` count,
+  per-severity `summary_delta`, and the two `standards.sha256` values with a
+  `standards_changed` flag so a rules change is surfaced rather than silently skewing
+  the diff. `delta_text(delta, *, color)` and `delta_markdown(delta)` render it
+  deterministically (sorted, LF, ASCII) using core's badge/style chrome; a cross-tool
+  compare raises `DeltaError`. This is the shared half of the "what changed since last
+  review?" feature — consumers add a `--diff-against FILE` flag on top, and coop-agent's
+  `coop review` can snapshot the previous JSON before overwriting it.
 
 ## [0.5.0] - 2026-07-14
 ### Fixed
