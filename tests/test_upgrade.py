@@ -261,6 +261,32 @@ def test_git_checkout_note_up_to_date():
     assert "up to date" in note
 
 
+def test_git_checkout_note_missing_git_binary_degrades_gracefully():
+    # git not on PATH -> subprocess.run raises FileNotFoundError (an OSError);
+    # the note degrades like the offline case instead of crashing.
+    def runner(*_a, **_k):
+        raise FileNotFoundError("git")
+
+    note, needs_pull = _git_checkout_note(Path("/repo"), runner)
+    assert needs_pull is False
+    assert "could not be run" in note
+
+
+def test_build_plan_git_checkout_missing_git_returns_usable_plan(tmp_path, monkeypatch):
+    # A git-checkout install on a machine without git must still yield a usable
+    # UpgradePlan (needs_pull False), not a FileNotFoundError traceback out of
+    # build_plan — the family's 'never a traceback' contract.
+    monkeypatch.setattr(upmod, "detect_install_method", lambda _pkg: ("git-checkout", tmp_path))
+
+    def runner(*_a, **_k):
+        raise FileNotFoundError("git")
+
+    plan = build_plan(NAME, "0.1.0", runner=runner, origin=lambda _p: None)
+    assert plan.install_method == "git-checkout"
+    assert plan.needs_pull is False
+    assert "could not be run" in plan.tool_note
+
+
 # -- build_plan: git-checkout / VCS / dependency-loop branches ---------------------------------
 
 

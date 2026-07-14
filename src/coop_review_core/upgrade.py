@@ -229,29 +229,41 @@ def _git_checkout_note(checkout: Path, runner=subprocess.run) -> tuple[str, bool
     ``needs_pull`` is the structured control signal consumed by
     :func:`upgrade_command`; the note is display-only, so rewording it can't
     silently disable the pull step.
+
+    A missing/unrunnable ``git`` binary (``OSError`` — e.g. a checkout copied
+    onto a machine without git, or a stripped PATH) degrades gracefully like the
+    offline/no-upstream cases rather than crashing ``build_plan`` with a
+    traceback, keeping the family's 'never a traceback' contract.
     """
-    has_upstream = (
-        runner(
-            ["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "@{upstream}"],
+    try:
+        has_upstream = (
+            runner(
+                ["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "@{upstream}"],
+                capture_output=True,
+                text=True,
+            ).returncode
+            == 0
+        )
+        if not has_upstream:
+            return (
+                "running from a git checkout with no upstream remote — upgrading "
+                "reinstalls from the local working tree",
+                False,
+            )
+        fetched = runner(["git", "-C", str(checkout), "fetch", "--quiet"], capture_output=True, text=True)
+        if fetched.returncode != 0:
+            return "running from a git checkout; `git fetch` failed (offline?)", False
+        behind = runner(
+            ["git", "-C", str(checkout), "rev-list", "--count", "HEAD..@{upstream}"],
             capture_output=True,
             text=True,
-        ).returncode
-        == 0
-    )
-    if not has_upstream:
+        )
+    except OSError:
         return (
-            "running from a git checkout with no upstream remote — upgrading "
+            "running from a git checkout but `git` could not be run — upgrading "
             "reinstalls from the local working tree",
             False,
         )
-    fetched = runner(["git", "-C", str(checkout), "fetch", "--quiet"], capture_output=True, text=True)
-    if fetched.returncode != 0:
-        return "running from a git checkout; `git fetch` failed (offline?)", False
-    behind = runner(
-        ["git", "-C", str(checkout), "rev-list", "--count", "HEAD..@{upstream}"],
-        capture_output=True,
-        text=True,
-    )
     count = (behind.stdout or "").strip()
     if behind.returncode == 0 and count.isdigit() and int(count) > 0:
         return f"{count} new commit(s) available on the upstream branch", True
