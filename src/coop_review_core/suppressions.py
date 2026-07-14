@@ -76,7 +76,13 @@ def scan_all_directives(text: str, tool: str) -> DirectiveScan:
     pattern = _directive_re(tool)
     rule_ignores: dict[int, set[str]] = {}
     syntax_ignore_lines: set[int] = set()
-    for lineno, line in enumerate(text.splitlines(), start=1):
+    # Number lines the way the family's parsers do — by \n only, after
+    # normalizing CRLF and lone CR to \n. `str.splitlines()` also splits on
+    # \x0b/\x0c (form feed, still in legacy SQL dumps), \x1c-\x1e, \x85 (NEL),
+    #  / ; any of those would shift every directive line number after
+    # it, silently misaligning suppressions against consumers that count \n.
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    for lineno, line in enumerate(normalized.split("\n"), start=1):
         match = pattern.search(line)
         if not match:
             continue

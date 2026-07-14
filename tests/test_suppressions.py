@@ -179,6 +179,38 @@ def test_syntax_token_never_parses_as_a_rule_id_in_scan_directives():
     assert d.get(1) == set()  # tokens present but none is a rule id -> suppress nothing
 
 
+@pytest.mark.parametrize("sep", ["\x0c", "\x85"])
+def test_scan_line_numbers_use_newline_only_not_splitlines(sep):
+    # str.splitlines() splits on more than \n (form feed \x0c, NEL \x85, etc.),
+    # but the family's parsers count \n only. A splitlines-only separator before
+    # a directive used to shift its line number, silently misaligning the
+    # suppression against a finding whose line was computed by \n counting.
+    from coop_review_core.suppressions import (
+        is_inline_suppressed,
+        scan_directives,
+        scan_syntax_ignores,
+    )
+
+    # One physical (\n) line 1 that happens to contain a form-feed/NEL char,
+    # then the directive on \n-line 2.
+    text = f"SELECT 1{sep}still line 1\n-- coop-sql-review:ignore SQL-A\n"
+    scan = scan_directives(text, TOOL)
+    assert scan == {2: {"SQL-A"}}  # \n-line 2, NOT shifted to 3 by the separator
+    assert is_inline_suppressed("SQL-A", 2, scan)  # a finding on \n-line 2 is covered
+
+    syntax_text = f"SELECT 1{sep}x\n-- coop-sql-review:ignore syntax\n"
+    assert scan_syntax_ignores(syntax_text, TOOL) == {2}
+
+
+def test_scan_line_numbers_use_newline_only_for_crlf_and_lone_cr():
+    # Both CRLF and a lone CR normalize to \n before counting, matching the
+    # consumers (coop-dax-review normalizes lone \r to \n before \n-splitting).
+    from coop_review_core.suppressions import scan_directives
+
+    assert scan_directives("a\r\nb\r\n-- coop-sql-review:ignore SQL-A\r\n", TOOL) == {3: {"SQL-A"}}
+    assert scan_directives("a\rb\r-- coop-sql-review:ignore SQL-A\r", TOOL) == {3: {"SQL-A"}}
+
+
 # --- single-pass scan_all_directives (issue #14) ------------------------------
 
 
@@ -192,7 +224,8 @@ def _reference_scan_directives(text, tool):
     rule_id_re = re.compile(r"[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+")
     pattern = _directive_re(tool)
     out = {}
-    for lineno, line in enumerate(text.splitlines(), start=1):
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    for lineno, line in enumerate(normalized.split("\n"), start=1):
         match = pattern.search(line)
         if not match:
             continue
@@ -214,7 +247,8 @@ def _reference_scan_syntax_ignores(text, tool):
 
     pattern = _directive_re(tool)
     out = set()
-    for lineno, line in enumerate(text.splitlines(), start=1):
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    for lineno, line in enumerate(normalized.split("\n"), start=1):
         match = pattern.search(line)
         if not match:
             continue
