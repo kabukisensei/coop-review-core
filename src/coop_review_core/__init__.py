@@ -11,6 +11,9 @@ tool name, and standards file:
 - :mod:`coop_review_core.config`       — the rules.yml config layer (rule toggles,
   severity/params overrides, and the human-readable ``ignore:`` finding list +
   its :func:`~coop_review_core.config.add_ignores` writer) + standards resolution.
+- :mod:`coop_review_core.cliutils`     — the shared CLI helper layer.
+- :mod:`coop_review_core.report`       — console/HTML report chrome, the machine-JSON
+  envelope, the SARIF 2.1.0 emitter, and the single bundled logo.
 
 - :mod:`coop_review_core.errors`       — :class:`CoopReviewError`, the common base of
   every user-facing error core raises (StandardsError, BaselineError, UpgradeError).

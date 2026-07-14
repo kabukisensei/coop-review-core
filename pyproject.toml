@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "coop-review-core"
 dynamic = ["version"]   # single-sourced from src/coop_review_core/__init__.py (see [tool.hatch.version])
-description = "Shared infrastructure for the coop-*-review standards linters: progress, diagnostics, severity/fingerprint, inline + baseline suppressions, self-update, and the rules.yml config layer."
+description = "Shared infrastructure for the coop-*-review standards linters: progress, diagnostics, severity/fingerprint, inline + baseline suppressions, self-update, the rules.yml config layer, the shared report/SARIF layer, and CLI helpers."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
