@@ -65,7 +65,7 @@ commit it.
 | `upgrade.py` | self-update planning (`build_plan`, `upgrade_command`). The ONLY networked module (PyPI JSON, `git fetch`); network/subprocess collaborators are injectable so tests stay offline. |
 | `config.py` | the rules.yml layer (`RuleConfig`, `apply_config`, the `ignore:` finding list + its `add_ignores` writer) and standards resolution (`resolve_standards_path`, `standards_info`, `StandardsError`). |
 | `cliutils.py` | the shared CLI helper layer (issue #10): `display_path`, `stdio_interactive`, `use_color`, `config_write_path` (the write-back-to-what-was-read rule; never inside the package), `apply_syntax_error_policy`, `write_extra_report`, `should_open_report`, `force_utf8_console`, `run_upgrade` + `with_upgrade_options`. Imports `upgrade.py` lazily, so a linter's `check` path stays offline-import-clean. |
-| `report.py` | the shared report layer (issue #9): console chrome (`BADGE`/`BADGE_COLOR`/`ANSI`/`sty`), the branded `HTML_STYLE` + `logo_data_uri` (the ONE bundled `data/cooptimize-logo.png`), `esc`/`chip`, and the machine-JSON envelope (`verdict`, `build_envelope`, `envelope_text`, `diagnostic_json`, `log_text`). Renders from plain data — never a tool's `Result`. |
+| `report.py` | the shared report layer (issue #9): console chrome (`BADGE`/`BADGE_COLOR`/`ANSI`/`sty`), the branded `HTML_STYLE` + `logo_data_uri` (the ONE bundled `data/cooptimize-logo.png`), `esc`/`chip`, the machine-JSON envelope (`verdict`, `build_envelope`, `envelope_text`, `diagnostic_json`, `log_text`), and the SARIF 2.1.0 emitter (`to_sarif`, `sarif_location`, `SARIF_LEVEL`, `SARIF_FINGERPRINT_KEY`). Renders from plain data — never a tool's `Result`. |
 | `data/` | package data shipped in the wheel: `cooptimize-logo.png` (the family's single logo copy). |
 
 `tests/` roughly mirrors the modules (`test_cliutils.py`, `test_config.py`,
@@ -110,6 +110,10 @@ files depend on these — breaking any of them is NOT a minor release):
 - the rules.yml schema (`rules:` map with `enabled` / `severity` / `params`; top-level `ignore:` list);
 - `CoopReviewError` as the common base of `StandardsError` / `BaselineError` / `UpgradeError`
   (consumers may catch it as "any core failure" — re-parenting any of the three off it is a break);
+- the SARIF `partialFingerprints` key default `SARIF_FINGERPRINT_KEY = "coopFingerprint/v2"`
+  (and the `fingerprint_key` default of `to_sarif`) — GitHub code scanning matches alerts across
+  runs by `(key, value)`, so renaming the already-shipped key orphans and re-opens every existing
+  alert (guarded by a pinning test + the frozen-key comment in `report.py`);
 - the family-wide **exit-code contract** (0 advisory / 1 friendly tool failure / 2 usage +
   `--strict` / 130 interrupt — the table in "Exit-code contract" below).
 
