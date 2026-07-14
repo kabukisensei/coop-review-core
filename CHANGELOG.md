@@ -4,6 +4,8 @@ All notable changes to **coop-review-core** are documented here. The format foll
 [Keep a Changelog](https://keepachangelog.com/), and the project uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.6.0] - 2026-07-14
 ### Added
 - `coop_review_core.delta`: run-to-run comparison of two review envelopes (issue #29).
   `diff_envelopes(old, new)` keys two same-tool envelopes on each finding's
