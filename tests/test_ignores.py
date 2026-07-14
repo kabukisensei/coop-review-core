@@ -2,6 +2,8 @@
 one writable config file, de-duplicates by fingerprint, preserves everything else
 in the file, and writes deterministically so re-runs are byte-stable."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -240,3 +242,31 @@ def test_add_ignores_drops_an_indented_comment_inside_the_block(tmp_path):
     assert "# inner note about aaa" not in out  # intentionally dropped
     assert "other: true" in out  # the top-level key is still preserved
     assert {e["fingerprint"] for e in yaml.safe_load(out)["ignore"]} == {"aaa", "bbb"}
+
+
+def test_add_ignores_maps_an_unreadable_target_to_friendly_standards_error(tmp_path, monkeypatch):
+    # An existing but unreadable target (locked file, revoked permissions) hits the
+    # read-path OSError branch: it must surface as a friendly one-line StandardsError,
+    # never a raw PermissionError traceback out of a consumer's --save-ignores (#22).
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text("ignore:\n  - fingerprint: aaa\n", encoding="utf-8")
+
+    def _boom(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    with pytest.raises(StandardsError) as excinfo:
+        add_ignores(cfg, [{"fingerprint": "bbb"}])
+    assert "\n" not in str(excinfo.value)  # one line, printable as-is
+
+
+def test_add_ignores_maps_an_unwritable_target_to_friendly_standards_error(tmp_path):
+    # The write-back (mkdir + write_text) can fail too — a read-only dir, or an
+    # ancestor that is a file. That OSError maps to the same friendly StandardsError
+    # as the read path, so --save-ignores exits with one line, never a traceback (#22).
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("i am a file, not a directory\n", encoding="utf-8")
+    cfg = blocker / "rules.yml"  # parent is a file -> mkdir/write_text raises OSError
+    with pytest.raises(StandardsError, match="cannot write ignores") as excinfo:
+        add_ignores(cfg, [{"fingerprint": "bbb"}])
+    assert "\n" not in str(excinfo.value)

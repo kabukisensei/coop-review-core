@@ -25,4 +25,4 @@ from coop_review_core.errors import CoopReviewError
 
 __all__ = ["CoopReviewError"]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

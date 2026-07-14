@@ -4,6 +4,8 @@ All notable changes to **coop-review-core** are documented here. The format foll
 [Keep a Changelog](https://keepachangelog.com/), and the project uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-07-14
 ### Fixed
 - Inline directive grammar now matches its documentation: `<tool>:ignore * reason: ...`
   is a wildcard (silences every rule on the line) in the rule view too, not just the
@@ -13,6 +15,23 @@ All notable changes to **coop-review-core** are documented here. The format foll
   This suppresses strictly more than before (a previously-inert directive now fires), so
   it is not a breaking change to the fail-closed contract; `ignore reason: ...` with no
   `*`/id still suppresses nothing.
+- Directive line numbers no longer drift on files containing form feeds / NEL / unicode
+  line separators (issue #17): `scan_all_directives` normalizes CRLF and lone CR to `\n`
+  and splits on `\n` only (not `str.splitlines`), so directive line numbers match
+  consumers' `\n`-based line counting.
+- `add_ignores` maps read/parse failures of the target (unreadable, non-UTF-8, invalid
+  YAML) to a friendly one-line `StandardsError` instead of a raw `UnicodeDecodeError` /
+  `yaml.YAMLError` traceback (issue #19), and now maps **write** failures (unwritable or
+  locked target, a parent that is a file) the same way (issue #22) — completing the
+  writer's error contract so a consumer's `--save-ignores` never leaks a traceback.
+- `RuleConfig.load` / `loads` honor their documented leniency on a non-mapping `rules:`
+  or rule-settings value instead of crashing with a raw `AttributeError` (issue #20).
+- `pip_install_origin` returns a real filesystem path for editable installs recorded with
+  a `file://` URL — it url-decodes percent-encoding and uses `url2pathname` for the
+  Windows `/C:/…` drive form, so the printed upgrade command points at a path that exists
+  (issue #18).
+- A git-checkout upgrade plan no longer raises an uncaught `FileNotFoundError` when git is
+  not installed; `build_plan` degrades gracefully (issue #21).
 
 ### Removed
 - **BREAKING (library API): `upgrade.apply_plan` (and its private `_run` subprocess

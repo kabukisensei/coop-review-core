@@ -581,6 +581,14 @@ def add_ignores(config_path: Path, entries: list[dict]) -> int:
         by_fp[fp] = clean
         added += 1
     new_text = _replace_ignore_block(text, _render_ignore_block(list(by_fp.values())))
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(new_text, encoding="utf-8", newline="\n")
+    # Map write failures (unwritable target, parent path is a file, read-only fs)
+    # to a friendly StandardsError, exactly like the read/parse failures above:
+    # config_write_path may hand us a path this run never validated, and the family
+    # contract says every user-facing failure is a printable CoopReviewError, never a
+    # raw OSError traceback out of a consumer's --save-ignores (issue #22).
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(new_text, encoding="utf-8", newline="\n")
+    except OSError as exc:
+        raise StandardsError(f"cannot write ignores to {config_path}: {exc}") from exc
     return added
