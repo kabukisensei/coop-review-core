@@ -46,4 +46,7 @@ release-check: ## version-vs-tag sanity check; run after bumping, before tagging
 	if [ -n "$$(git status --porcelain)" ]; then \
 	  echo "WARN: working tree not clean - a tag made now would not match what you tested"; \
 	fi; \
+	if ! grep -q "^## \[$$PKG\]" CHANGELOG.md; then \
+	  echo "WARN: CHANGELOG.md has no '## [$$PKG]' heading - rotate [Unreleased] before tagging (see AGENTS.md release steps)"; \
+	fi; \
 	echo "OK: version $$PKG is release-ready"

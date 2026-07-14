@@ -249,18 +249,21 @@ strands that venv off the released version and breaks the consumer's bare
 Release steps, in order:
 
 1. Bump `__version__` — one line, one file.
-2. `make release-check` — expect `OK: version X.Y.Z is release-ready`.
+2. Rotate `CHANGELOG.md`: rename the `## [Unreleased]` heading to
+   `## [X.Y.Z] - YYYY-MM-DD` (today's date) and open a fresh empty
+   `## [Unreleased]` above it. Every shipped version must have a dated section.
+3. `make release-check` — expect `OK: version X.Y.Z is release-ready`.
    `FAIL: tag vX.Y.Z already exists` means the bump was forgotten.
-3. Commit and push the bump (only when the human asked for a release).
-4. `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push IS the publish
+4. Commit and push the bump (only when the human asked for a release).
+5. `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push IS the publish
    trigger.
-5. Verify: the `Publish to PyPI` workflow run succeeds and
+6. Verify: the `Publish to PyPI` workflow run succeeds and
    `pip index versions coop-review-core` (or the PyPI page) lists X.Y.Z.
-6. Downstream: refresh each consumer venv
+7. Downstream: refresh each consumer venv
    (`.venv/bin/python -m pip install -U coop-review-core`), then release the
    tools — their pyprojects pin `coop-review-core>=<version>`, so the order
    across the suite is always core first.
-7. Suite definition-of-done: when this is part of a suite release, the release
+8. Suite definition-of-done: when this is part of a suite release, the release
    is **not done** until the `coop-website` repo is synced + pushed —
    `versions.json` updated first, then both of its check scripts print `PASS`
    (exact procedure: coop-website's `AGENTS.md`, "Release-time procedure").
