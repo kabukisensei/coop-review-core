@@ -2,23 +2,21 @@
 hierarchy, and the do-not-break names (issue #8)."""
 
 import importlib
+import pkgutil
 
 import pytest
 
+import coop_review_core
 from coop_review_core import CoopReviewError
 from coop_review_core.config import StandardsError
 from coop_review_core.suppressions import BaselineError
 from coop_review_core.upgrade import UpgradeError
 
-MODULES = [
-    "coop_review_core",
-    "coop_review_core.errors",
-    "coop_review_core.progress",
-    "coop_review_core.diagnostics",
-    "coop_review_core.severity",
-    "coop_review_core.suppressions",
-    "coop_review_core.upgrade",
-    "coop_review_core.config",
+# Derive the module list from the package itself so a NEWLY-ADDED module can
+# never be silently skipped by the star-import / private-leak audit — the way
+# the hand-maintained list once skipped the 0.4.0 additions (cliutils, report).
+MODULES = ["coop_review_core"] + [
+    f"coop_review_core.{info.name}" for info in pkgutil.iter_modules(coop_review_core.__path__)
 ]
 
 
@@ -88,6 +86,38 @@ def test_all_mirrors_the_do_not_break_list():
             "load_config_friendly",
             "parse_syntax_errors_knob",
             "SYNTAX_ERROR_MODES",
+        },
+        # The 0.4.0 shared layers: both shipped consumers import these at module
+        # load (coop-sql-review & coop-dax-review cli.py / report.py), so dropping
+        # one from __all__ or the module is a do-not-break regression.
+        "coop_review_core.cliutils": {
+            "display_path",
+            "stdio_interactive",
+            "use_color",
+            "config_write_path",
+            "apply_syntax_error_policy",
+            "write_extra_report",
+            "should_open_report",
+            "force_utf8_console",
+            "run_upgrade",
+            "with_upgrade_options",
+        },
+        "coop_review_core.report": {
+            "BADGE",
+            "BADGE_COLOR",
+            "ANSI",
+            "sty",
+            "HTML_STYLE",
+            "logo_data_uri",
+            "esc",
+            "chip",
+            "verdict",
+            "build_envelope",
+            "envelope_text",
+            "diagnostic_json",
+            "log_text",
+            "to_sarif",
+            "SARIF_FINGERPRINT_KEY",
         },
     }
     for name, names in expected.items():
