@@ -170,10 +170,13 @@ def test_a_git_file_is_a_boundary_too(tmp_path):
     assert found.source == "none"
 
 
-def test_walk_stops_at_the_filesystem_root(tmp_path):
+def test_walk_stops_at_the_filesystem_root(tmp_path, monkeypatch):
     # From the real filesystem root there are no parents left: the walk must
     # terminate (no infinite loop) and fall through. An improbable tool name
-    # guarantees no real file on this machine matches.
+    # guarantees no real tool-named file matches; monkeypatch the fixed legacy
+    # name too so a stray root-level `rules.yml` (plausible on a Windows dev box
+    # or a root-writable Linux image) can't flip the source and make this flaky.
+    monkeypatch.setattr("coop_review_core.config._LEGACY_CONFIG_NAME", "coop-zz-nonexistent-rules-zz.yml")
     bundled = tmp_path / "bundled-rules.yml"
     found = _discover(Path(Path(tmp_path).anchor), bundled=bundled, tool="coop-zz-nonexistent-review-zz")
     assert found.source == "bundled"
