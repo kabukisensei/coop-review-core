@@ -4,6 +4,16 @@ All notable changes to **coop-review-core** are documented here. The format foll
 [Keep a Changelog](https://keepachangelog.com/), and the project uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Inline directive grammar now matches its documentation: `<tool>:ignore * reason: ...`
+  is a wildcard (silences every rule on the line) in the rule view too, not just the
+  syntax view (issue #16). Previously the rule view judged the raw tail, so a `*` with a
+  reason attached suppressed nothing while the syntax view treated the same line as a
+  wildcard — internally inconsistent, and the docs actively encourage attaching a reason.
+  This suppresses strictly more than before (a previously-inert directive now fires), so
+  it is not a breaking change to the fail-closed contract; `ignore reason: ...` with no
+  `*`/id still suppresses nothing.
+
 ### Removed
 - **BREAKING (library API): `upgrade.apply_plan` (and its private `_run` subprocess
   executor) is removed** (issue #5; Aaron's call: remove). Both shipped linters print

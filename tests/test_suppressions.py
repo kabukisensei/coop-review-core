@@ -38,6 +38,18 @@ def test_scan_explicit_star_is_wildcard():
     assert scan_directives("-- coop-sql-review:ignore *\n", TOOL) == {1: {"*"}}
 
 
+def test_scan_star_with_reason_is_wildcard():
+    # issue #16: the documented grammar is `<tool>:ignore [RULE-IDS | *] [reason: ...]`,
+    # so `* reason: ...` composes a wildcard with a human reason. It must suppress
+    # every rule on the line in BOTH views (rule and syntax), like a bare `*`.
+    from coop_review_core.suppressions import scan_syntax_ignores
+
+    assert scan_directives("-- coop-sql-review:ignore * reason: x\n", TOOL) == {1: {"*"}}
+    assert scan_syntax_ignores("-- coop-sql-review:ignore * reason: x\n", TOOL) == {1}
+    # But a reason with NO `*` and NO id still fails closed: suppress nothing.
+    assert scan_directives("-- coop-sql-review:ignore reason: x\n", TOOL) == {1: set()}
+
+
 def test_scan_unparseable_id_does_not_become_wildcard():
     # A directive that NAMES a rule but whose token doesn't parse (typo'd id,
     # lowercase, no hyphen) must fail closed: suppress NOTHING, never everything.
@@ -215,8 +227,10 @@ def test_scan_line_numbers_use_newline_only_for_crlf_and_lone_cr():
 
 
 def _reference_scan_directives(text, tool):
-    """The pre-#14 two-loop implementation of scan_directives, kept verbatim as
-    the grammar's reference for the equivalence property test below."""
+    """An independent two-loop implementation of scan_directives, kept as the
+    grammar's reference for the equivalence property test below. The wildcard
+    condition tracks the documented grammar (issue #16): a bare head OR a head of
+    the literal ``*`` (so ``* reason: ...`` is a wildcard)."""
     import re
 
     from coop_review_core.suppressions import _directive_re, _REASON_SPLIT_RE  # noqa: PLC2701
@@ -234,7 +248,7 @@ def _reference_scan_directives(text, tool):
         ids = set(rule_id_re.findall(head))
         if ids:
             out[lineno] = ids
-        elif raw.strip() in ("", "*"):
+        elif raw.strip() == "" or head.strip() == "*":
             out[lineno] = {"*"}
         else:
             out[lineno] = set()

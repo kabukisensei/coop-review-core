@@ -90,17 +90,22 @@ def scan_all_directives(text: str, tool: str) -> DirectiveScan:
         # token isn't captured as a rule id.
         raw = match.group(1)
         head = _REASON_SPLIT_RE.split(raw, maxsplit=1)[0]
-        # Rule view (fail-closed; see scan_directives for the contract).
+        # Rule view (fail-closed; see scan_directives for the contract). The
+        # wildcard is judged on the pre-delimiter HEAD, so `ignore * reason: ...`
+        # is a wildcard in BOTH views (matching the documented grammar
+        # `<tool>:ignore [RULE-IDS | *] [reason: ...]`), while `ignore reason:
+        # ...` (empty head, non-empty raw) still stays fail-closed and suppresses
+        # nothing.
         ids = set(_RULE_ID_RE.findall(head))
         if ids:
             rule_ignores[lineno] = ids
-        elif raw.strip() in ("", "*"):
-            rule_ignores[lineno] = {"*"}  # truly bare directive (or literal *): suppress all
+        elif raw.strip() == "" or head.strip() == "*":
+            rule_ignores[lineno] = {"*"}  # bare directive or `*` (with or without a reason): suppress all
         else:
             rule_ignores[lineno] = set()  # tokens written but none parsed -> suppress nothing
-        # Syntax view (see scan_syntax_ignores for the contract). NB deliberately
-        # judged on the pre-delimiter head, so `ignore reason: ...` / `ignore *
-        # reason: ...` keep their historical meanings in each view.
+        # Syntax view (see scan_syntax_ignores for the contract). Judged on the
+        # pre-delimiter head, so `ignore *` / `ignore * reason: ...` are wildcards
+        # in this view too, matching the rule view above.
         tokens = head.split()
         if not tokens or head.strip() == "*" or any(token.lower() == "syntax" for token in tokens):
             syntax_ignore_lines.add(lineno)
@@ -112,10 +117,13 @@ def scan_directives(text: str, tool: str) -> dict[int, set[str]]:
     ids it silences.
 
     Fail-closed: the blanket ``{"*"}`` wildcard (silence every rule on the
-    target line) fires ONLY for a truly bare directive — an empty/whitespace
-    tail or the literal ``*``. If the user wrote tokens but NONE parsed as a
-    rule-id shape (a typo'd / lowercase / un-hyphenated id like ``SQL001`` or
-    ``sql-no-select-star``), the line gets an empty id set so that NOTHING is
+    target line) fires for a truly bare directive (an empty/whitespace tail) or
+    a directive whose pre-delimiter head is the literal ``*`` — so
+    ``ignore *`` and ``ignore * reason: ...`` are both wildcards, matching the
+    documented grammar ``<tool>:ignore [RULE-IDS | *] [reason: ...]``. If the
+    user wrote tokens but NONE parsed as a rule-id shape (a typo'd / lowercase /
+    un-hyphenated id like ``SQL001`` or ``sql-no-select-star``, or a bare
+    ``reason: ...`` with no id), the line gets an empty id set so that NOTHING is
     suppressed, rather than silently silencing everything.
 
     A thin view over :func:`scan_all_directives` (the single directive grammar).
