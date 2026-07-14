@@ -198,6 +198,35 @@ def test_add_ignores_preserves_a_trailing_eof_comment_after_the_block(tmp_path):
     }
 
 
+def test_add_ignores_maps_invalid_yaml_to_friendly_standards_error(tmp_path):
+    # The target of a --save-ignores run may be a file this run never validated
+    # (config_write_path can select a path the run didn't read). Its read+parse
+    # must honor the family contract: a friendly one-line StandardsError, never a
+    # raw yaml.YAMLError traceback escaping to the user.
+    cfg = tmp_path / "rules.yml"
+    cfg.write_text("ignore:\n  - fingerprint: aaa\n  bad: [unbalanced\n", encoding="utf-8")
+    with pytest.raises(StandardsError, match="invalid YAML") as excinfo:
+        add_ignores(cfg, [{"fingerprint": "bbb"}])
+    assert "\n" not in str(excinfo.value)  # one line, printable as-is
+
+
+def test_add_ignores_maps_utf16_target_to_friendly_standards_error(tmp_path):
+    # A UTF-16 target (e.g. a PowerShell-created file) must not raise a raw
+    # UnicodeDecodeError with a codec traceback — it maps to the same friendly
+    # not-UTF-8 StandardsError the loaders use. Both the BOM and BOM-less
+    # (NUL-sniffed) forms are covered.
+    cfg = tmp_path / "rules.yml"
+    cfg.write_bytes("ignore:\n  - fingerprint: aaa\n".encode("utf-16"))  # UTF-16 with BOM
+    with pytest.raises(StandardsError, match="not UTF-8") as excinfo:
+        add_ignores(cfg, [{"fingerprint": "bbb"}])
+    assert "\n" not in str(excinfo.value)
+
+    cfg2 = tmp_path / "r2.yml"
+    cfg2.write_bytes("ignore:\n".encode("utf-16-le"))  # UTF-16 without a BOM (NUL sniff)
+    with pytest.raises(StandardsError, match="not UTF-8"):
+        add_ignores(cfg2, [{"fingerprint": "bbb"}])
+
+
 def test_add_ignores_drops_an_indented_comment_inside_the_block(tmp_path):
     # documented behavior: a comment INDENTED with the entries is owned by the
     # writer and rewritten away (only top-level comments are preserved).

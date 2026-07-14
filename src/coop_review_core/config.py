@@ -538,8 +538,22 @@ def add_ignores(config_path: Path, entries: list[dict]) -> int:
     # utf-8-sig, like every loader: a BOM (e.g. from a PowerShell redirect) glued
     # to a first-line `ignore:` key otherwise hides that line from both the
     # duplicate-block guard and the splice anchor below, so a second top-level
-    # `ignore:` block gets appended. The write below stays BOM-less.
-    text = config_path.read_text(encoding="utf-8-sig") if config_path.is_file() else ""
+    # `ignore:` block gets appended. The write below stays BOM-less. Map the
+    # read/parse failures to friendly StandardsError one-liners, exactly like
+    # load_config_friendly: this target may be a file this run never validated
+    # (config_write_path can select a different path than the run read), and the
+    # family contract says every user-facing failure is a printable CoopReviewError,
+    # never a raw UnicodeDecodeError / yaml.YAMLError traceback.
+    text = ""
+    if config_path.is_file():
+        try:
+            text = config_path.read_text(encoding="utf-8-sig")
+            if "\x00" in text:  # UTF-16 without a BOM decodes as NUL-riddled "UTF-8"
+                raise UnicodeDecodeError("utf-8", b"", 0, 1, "null byte")
+        except UnicodeDecodeError:
+            raise StandardsError(f"{config_path}: {_MSG_NOT_UTF8}") from None
+        except OSError as exc:
+            raise StandardsError(str(exc)) from exc
     # Refuse to touch a file with two top-level `ignore:` keys (a merge conflict
     # or a hand-edit): YAML keeps only the last on load, so a blind rewrite would
     # silently drop the other block's entries. Fail safe — the user resolves it.
@@ -548,7 +562,10 @@ def add_ignores(config_path: Path, entries: list[dict]) -> int:
             f"{config_path} has more than one top-level 'ignore:' key; "
             "merge them into one by hand before saving new ignores"
         )
-    loaded = yaml.safe_load(text) if text.strip() else None
+    try:
+        loaded = yaml.safe_load(text) if text.strip() else None
+    except yaml.YAMLError as exc:
+        raise StandardsError(f"{config_path}: invalid YAML - {' '.join(str(exc).split())}") from exc
     existing = _read_ignore_entries(loaded.get("ignore") if isinstance(loaded, dict) else [])
     by_fp = {e["fingerprint"]: e for e in existing}
     added = 0
