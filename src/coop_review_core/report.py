@@ -32,10 +32,12 @@ __all__ = [
     "ANSI",
     "sty",
     "HTML_STYLE",
+    "HTML_SCRIPT",
     "LOGO_PATH",
     "logo_data_uri",
     "esc",
     "chip",
+    "filter_bar_html",
     "verdict",
     "build_envelope",
     "envelope_text",
@@ -124,6 +126,74 @@ h2 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.04em; colo
 .msg { grid-column: 2; }
 .empty { color: var(--muted); padding: 24px; text-align: center; background: var(--card);
   border: 1px solid var(--line); border-radius: 12px; }
+/* --- filtering --- */
+.pill { cursor: pointer; user-select: none; transition: opacity 0.15s; }
+.pill[data-active="false"] { opacity: 0.4; filter: grayscale(100%); }
+#searchFilter { width: 100%; max-width: 320px; padding: 6px 12px; margin-left: auto;
+  border: 1px solid var(--line); border-radius: 999px; font-family: inherit; font-size: 0.85rem;
+  background: var(--card); color: var(--ink); outline: none; }
+#searchFilter:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(0,64,104,0.1); }
+[hidden] { display: none !important; }
+""".strip()
+
+HTML_SCRIPT = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const pills = document.querySelectorAll('.pills .pill');
+  const search = document.getElementById('searchFilter');
+  if (!pills.length && !search) return;
+
+  const state = { text: '', severities: new Set() };
+  
+  pills.forEach(p => {
+    const sev = p.dataset.sev;
+    if (sev) {
+      state.severities.add(sev);
+      p.dataset.active = "true";
+      p.addEventListener('click', () => {
+        if (state.severities.has(sev)) {
+          state.severities.delete(sev);
+          p.dataset.active = "false";
+        } else {
+          state.severities.add(sev);
+          p.dataset.active = "true";
+        }
+        update();
+      });
+    }
+  });
+
+  if (search) {
+    search.addEventListener('input', (e) => {
+      state.text = e.target.value;
+      update();
+    });
+  }
+
+  function update() {
+    const term = state.text.toLowerCase();
+    
+    document.querySelectorAll('.card').forEach(card => {
+      let cardHasVisible = false;
+      const cardPath = (card.querySelector('.file')?.textContent || '').toLowerCase();
+      
+      card.querySelectorAll('.f').forEach(row => {
+        const sev = row.dataset.sev || 'info';
+        const text = (row.textContent || '').toLowerCase();
+        
+        const sevMatch = state.severities.has(sev);
+        const textMatch = !term || text.includes(term) || cardPath.includes(term);
+        const show = sevMatch && textMatch;
+        
+        row.hidden = !show;
+        if (show) cardHasVisible = true;
+      });
+      
+      card.hidden = !cardHasVisible;
+    });
+  }
+});
+</script>
 """.strip()
 
 # The ONE bundled copy of the Cooptimize logo the whole family shares.
@@ -149,6 +219,11 @@ def chip(severity: str) -> str:
     """A severity chip ``<span>``; an unknown severity styles as ``info``."""
     sev = severity if severity in SEVERITIES else "info"
     return f'<span class="chip {sev}">{esc(severity)}</span>'
+
+
+def filter_bar_html() -> str:
+    """The interactive search box for the HTML report chrome."""
+    return '<input type="text" id="searchFilter" placeholder="Filter findings..." />'
 
 
 # --- the machine-JSON envelope (the agent contract) -----------------------------

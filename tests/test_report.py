@@ -73,6 +73,15 @@ def test_chip_known_and_unknown_severity():
     assert chip("bogus") == '<span class="chip info">bogus</span>'  # unknown styles as info
 
 
+def test_html_script_and_filter_bar_are_ascii_safe():
+    from coop_review_core.report import HTML_SCRIPT, filter_bar_html
+
+    assert HTML_SCRIPT.isascii()
+    assert filter_bar_html().isascii()
+    assert "document.addEventListener" in HTML_SCRIPT
+    assert 'id="searchFilter"' in filter_bar_html()
+
+
 # --- verdict --------------------------------------------------------------------
 
 

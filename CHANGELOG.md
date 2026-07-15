@@ -4,7 +4,10 @@ All notable changes to **coop-review-core** are documented here. The format foll
 [Keep a Changelog](https://keepachangelog.com/), and the project uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.7.0] - 2026-07-15
 ### Added
+- `report.HTML_SCRIPT` and `report.filter_bar_html()`: a dependency-free, offline `<script>` block and search input that adds interactive filtering to the branded HTML report (issue #31). The existing `.pill` elements become toggle buttons filtering by severity, and the text input filters by rule ID, file path, or finding message. `report.HTML_STYLE` is extended to support the active states.
 - `report.to_junit`: a deterministic JUnit XML emitter next to `to_sarif` (issue #30), for
   Azure DevOps' native `PublishTestResults@2` task (a Tests tab, failure counts, and
   run-over-run trends — no marketplace extension, unlike SARIF). Same plain-data contract as
