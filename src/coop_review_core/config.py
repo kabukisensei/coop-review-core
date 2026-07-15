@@ -20,6 +20,7 @@ Editing it changes behavior with no rebuild.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import re
@@ -52,7 +53,7 @@ __all__ = [
 
 # The optional keys an ``ignore:`` entry may carry, rendered in this order.
 # ``fingerprint`` is the only match key; the rest are human context.
-_IGNORE_KEYS = ("fingerprint", "rule", "where", "note")
+_IGNORE_KEYS = ("fingerprint", "rule", "where", "note", "expires")
 # Values that a bare (unquoted) YAML scalar would coerce to a non-string.
 _YAML_KEYWORDS = {"true", "false", "null", "yes", "no", "on", "off", "none", "~"}
 # Leading characters that make a plain scalar ambiguous (indicators).
@@ -215,6 +216,7 @@ class RuleConfig:
     params: dict[str, dict] = field(default_factory=dict)  # per-rule tunables (e.g. thresholds)
     configured: set[str] = field(default_factory=set)  # every rule id mentioned in the file
     ignored_fingerprints: set[str] = field(default_factory=set)  # findings silenced via `ignore:`
+    ignore_entries: list[dict] = field(default_factory=list)  # the raw parsed entries
 
     @classmethod
     def load(cls, path: Path | None) -> "RuleConfig":
@@ -279,18 +281,43 @@ class RuleConfig:
             if isinstance(settings.get("params"), dict):
                 params[rule_id] = settings["params"]
         ignore_section = data.get("ignore", []) if isinstance(data, dict) else []
+        entries = _read_ignore_entries(ignore_section)
         return cls(
             disabled=disabled,
             enabled=enabled,
             severity_overrides=overrides,
             params=params,
             configured={str(rule_id) for rule_id in rules},
-            ignored_fingerprints={e["fingerprint"] for e in _read_ignore_entries(ignore_section)},
+            ignored_fingerprints={e["fingerprint"] for e in entries},
+            ignore_entries=entries,
         )
 
     def unknown_rule_ids(self, known: set[str]) -> list[str]:
         """Configured rule ids that don't match any real rule (typos / removed rules)."""
         return sorted(self.configured - known)
+
+    @staticmethod
+    def partition_expired(entries: list[dict], today: datetime.date) -> tuple[set[str], list[dict]]:
+        """Return (active_fps, expired_entries). An entry with an `expires: YYYY-MM-DD`
+        date strictly before `today` is expired."""
+        active_fps = set()
+        expired = []
+        for e in entries:
+            exp_str = e.get("expires")
+            if not exp_str:
+                active_fps.add(e["fingerprint"])
+                continue
+            try:
+                exp_date = datetime.date.fromisoformat(exp_str)
+            except ValueError as exc:
+                raise StandardsError(
+                    f"invalid expires date '{exp_str}' (expected YYYY-MM-DD): {exc}"
+                ) from exc
+            if exp_date < today:
+                expired.append(e)
+            else:
+                active_fps.add(e["fingerprint"])
+        return active_fps, expired
 
 
 # The `syntax_errors:` knob shared by the linters (issue #4/#1): a valid syntax
@@ -435,6 +462,13 @@ def _read_ignore_entries(section) -> list[dict]:
             for key in _IGNORE_KEYS[1:]:
                 value = raw.get(key)
                 if value not in (None, ""):
+                    if key == "expires":
+                        try:
+                            datetime.date.fromisoformat(str(value))
+                        except ValueError as exc:
+                            raise StandardsError(
+                                f"invalid expires date '{value}' (expected YYYY-MM-DD): {exc}"
+                            ) from exc
                     entry[key] = str(value)
             entries.append(entry)
     return entries

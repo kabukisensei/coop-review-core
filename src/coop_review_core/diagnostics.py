@@ -25,6 +25,7 @@ __all__ = [
     "CONFIG_UNKNOWN_RULE",
     "BASELINE_STALE",
     "IGNORE_STALE",
+    "IGNORE_EXPIRED",
     "SCAN_EMPTY",
     "SYNTAX_ERROR",
     "Diagnostic",
@@ -40,6 +41,7 @@ FILE_UNREADABLE = "file_unreadable"
 CONFIG_UNKNOWN_RULE = "config_unknown_rule"  # rules.yml names a rule id that doesn't exist
 BASELINE_STALE = "baseline_stale"  # a baseline entry no longer matches any current finding
 IGNORE_STALE = "ignore_stale"  # a rules.yml `ignore:` entry no longer matches any current finding
+IGNORE_EXPIRED = "ignore_expired"  # a rules.yml `ignore:` entry is past its expires date
 SCAN_EMPTY = "scan_empty"  # a scan found no input files at all under a given path
 SYNTAX_ERROR = "syntax_error"  # input that fails the tool's own syntax validation
 

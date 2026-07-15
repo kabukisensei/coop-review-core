@@ -7,6 +7,8 @@ All notable changes to **coop-review-core** are documented here. The format foll
 
 ## [0.7.0] - 2026-07-15
 ### Added
+- Expiring ignores: `rules.yml` ignore entries now accept an `expires: YYYY-MM-DD` key (issue #32).
+  A pure helper `RuleConfig.partition_expired(entries, today: date)` allows the caller to deterministically separate active fingerprints from expired entries. Malformed dates fail safe as a friendly `StandardsError` during `load_config_friendly`. A new `IGNORE_EXPIRED` category was added to `diagnostics.py` so linters can emit a warning when a finding resurfaces.
 - `report.HTML_SCRIPT` and `report.filter_bar_html()`: a dependency-free, offline `<script>` block and search input that adds interactive filtering to the branded HTML report (issue #31). The existing `.pill` elements become toggle buttons filtering by severity, and the text input filters by rule ID, file path, or finding message. `report.HTML_STYLE` is extended to support the active states.
 - `report.to_junit`: a deterministic JUnit XML emitter next to `to_sarif` (issue #30), for
   Azure DevOps' native `PublishTestResults@2` task (a Tests tab, failure counts, and

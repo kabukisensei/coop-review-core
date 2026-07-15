@@ -270,3 +270,31 @@ def test_add_ignores_maps_an_unwritable_target_to_friendly_standards_error(tmp_p
     with pytest.raises(StandardsError, match="cannot write ignores") as excinfo:
         add_ignores(cfg, [{"fingerprint": "bbb"}])
     assert "\n" not in str(excinfo.value)
+
+
+def test_partition_expired_splits_by_date_and_validates():
+    from datetime import date
+
+    today = date(2026, 7, 15)
+    entries = [
+        {"fingerprint": "a", "expires": "2026-07-16"},  # future (active)
+        {"fingerprint": "b", "expires": "2026-07-15"},  # today (active)
+        {"fingerprint": "c", "expires": "2026-07-14"},  # past (expired)
+        {"fingerprint": "d"},  # no expiry (active)
+    ]
+    active, expired = RuleConfig.partition_expired(entries, today)
+    assert active == {"a", "b", "d"}
+    assert [e["fingerprint"] for e in expired] == ["c"]
+
+    with pytest.raises(StandardsError, match="invalid expires date"):
+        RuleConfig.partition_expired([{"fingerprint": "x", "expires": "bad"}], today)
+
+
+def test_add_ignores_supports_expires_key(tmp_path):
+    cfg = tmp_path / "rules.yml"
+    add_ignores(cfg, [{"fingerprint": "x", "expires": "2026-09-30"}])
+    reloaded = yaml.safe_load(cfg.read_text(encoding="utf-8"))["ignore"][0]
+    assert reloaded["expires"] == "2026-09-30"
+
+    config = RuleConfig.load(cfg)
+    assert config.ignore_entries[0]["expires"] == "2026-09-30"
