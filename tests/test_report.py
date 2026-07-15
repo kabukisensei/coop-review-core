@@ -311,3 +311,73 @@ def test_sarif_fingerprint_key_defaults_frozen_and_is_injectable():
     assert row["partialFingerprints"] == {"coopFingerprint/v2": "aaaaaaaaaaaa"}
     custom = json.loads(_sample_sarif(fingerprint_key="daxFingerprint/v1"))
     assert custom["runs"][0]["results"][0]["partialFingerprints"] == {"daxFingerprint/v1": "aaaaaaaaaaaa"}
+
+
+# --- to_junit (JUnit XML) ------------------------------------------------------
+
+
+def _sample_junit(**kw):
+    from coop_review_core.report import to_junit
+
+    findings = [
+        {"rule_id": "R-B", "severity": "warning", "file": "b.sql", "line": 5, "message": "warn me"},
+        {"rule_id": "R-A", "severity": "error", "file": "a.sql", "line": 3, "message": 'bad <x> & "y"'},
+    ]
+    diags = [
+        Diagnostic(severity="error", category="syntax_error", file="c.sql", line=1, message="boom"),
+        Diagnostic(severity="warning", category="parse_degraded", file="d.sql", line=2, message="meh"),
+    ]
+    return to_junit(
+        tool_name="coop-x",
+        version="1.2.3",
+        findings=findings,
+        diagnostics=diags,
+        checked=4,
+        unit="file",
+        **kw,
+    )
+
+
+def test_to_junit_is_wellformed_ascii_and_byte_stable():
+    import xml.etree.ElementTree as ET
+
+    xml = _sample_junit()
+    ET.fromstring(xml)  # raises if not well-formed
+    assert xml == _sample_junit()  # deterministic
+    assert xml.endswith("\n")
+    xml.encode("ascii")  # ensure_ascii-safe
+    assert "timestamp" not in xml  # no timestamps -> byte-identical across runs
+
+
+def test_to_junit_maps_severity_and_diagnostics():
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(_sample_junit())
+    # 2 findings + the error diagnostic (the warning diagnostic is dropped, like to_sarif)
+    assert root.get("tests") == "3"
+    assert root.get("failures") == "2"  # R-A error + the syntax-error diagnostic
+    assert root.get("skipped") == "1"  # R-B warning
+    cases = {tc.get("classname"): tc for tc in root.iter("testcase")}
+    assert cases["R-A"].find("failure") is not None
+    assert cases["R-B"].find("skipped") is not None
+    assert cases["syntax-error"].find("failure") is not None
+    assert cases["R-A"].find("failure").text == 'bad <x> & "y"'  # XML-escaped, decodes back
+
+
+def test_to_junit_sorts_deterministically_regardless_of_input_order():
+    import xml.etree.ElementTree as ET
+
+    from coop_review_core.report import to_junit
+
+    xml = to_junit(
+        tool_name="t",
+        version="1",
+        findings=[
+            {"rule_id": "Z", "severity": "error", "file": "z.sql", "line": 1, "message": "m"},
+            {"rule_id": "A", "severity": "error", "file": "a.sql", "line": 1, "message": "m"},
+        ],
+        checked=1,
+        unit="file",
+    )
+    ids = [tc.get("classname") for tc in ET.fromstring(xml).iter("testcase")]
+    assert ids == ["A", "Z"]

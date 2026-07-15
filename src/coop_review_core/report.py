@@ -45,6 +45,7 @@ __all__ = [
     "SARIF_FINGERPRINT_KEY",
     "sarif_location",
     "to_sarif",
+    "to_junit",
 ]
 
 # --- console chrome -----------------------------------------------------------
@@ -365,3 +366,109 @@ def to_sarif(
         ],
     }
     return json.dumps(log, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+
+
+# --- JUnit XML (Azure DevOps PublishTestResults@2 — native, no extension) -----------
+
+
+def _junit_name(f: Mapping) -> str:
+    """A stable per-finding test name from whatever a finding carries: ``file:line``
+    (sql), else ``model :: object`` (dax), else the object/model, else ``?``."""
+    file = str(f.get("file") or "")
+    if file:
+        line = f.get("line")
+        return f"{file}:{line}" if line else file
+    model = str(f.get("model") or "")
+    obj = str(f.get("object") or "")
+    if model and obj:
+        return f"{model} :: {obj}"
+    return obj or model or "?"
+
+
+def to_junit(
+    *,
+    tool_name: str,
+    version: str,
+    findings: Sequence[Mapping],
+    agent_review: Sequence[Mapping] = (),
+    diagnostics: Sequence[Diagnostic] = (),
+    checked: int = 0,
+    unit: str = "file",
+    diagnostics_rule_id: str = "syntax-error",
+) -> str:
+    """A deterministic JUnit XML report (string + trailing LF).
+
+    Azure DevOps pipelines render SARIF only via a marketplace extension, but consume
+    JUnit XML natively through the built-in ``PublishTestResults@2`` task — a Tests tab,
+    failure counts, and run-over-run trends with zero extensions. Same plain-data
+    contract as :func:`to_sarif` (core never imports a tool's ``Result``): ``findings`` /
+    ``agent_review`` are mappings with ``rule_id`` / ``severity`` / ``file`` / ``line`` /
+    ``message`` (agent items use ``note``); ``diagnostics`` are :class:`Diagnostic`.
+
+    Each finding is a ``<testcase classname="<rule_id>" name="<file>:<line>">``: an
+    **error**-severity finding becomes a ``<failure>``, a **warning**/**info** finding a
+    ``<skipped>`` (advisory — only errors are hard failures; a caller wanting a stricter
+    gate opts in with the tool's ``--strict``). Agent-review items are non-blocking
+    ``<skipped>``. Each **error**-severity diagnostic is a ``<failure>`` under the synthetic
+    diagnostics rule, mirroring :func:`to_sarif`. No timestamps (``time="0"``, no
+    ``timestamp`` attr), sorted, XML-escaped via stdlib ``xml.sax.saxutils`` (no new runtime
+    dep), ``ensure_ascii``-safe — byte-identical across runs and OSes."""
+    from xml.sax.saxutils import escape, quoteattr
+
+    rows: list[tuple[str, str, str, str, str]] = []  # (classname, name, kind, severity, message)
+    for f in findings:
+        sev = str(f.get("severity") or "info")
+        rows.append(
+            (
+                str(f.get("rule_id") or ""),
+                _junit_name(f),
+                "failure" if sev == "error" else "skipped",
+                sev,
+                str(f.get("message") or ""),
+            )
+        )
+    for a in agent_review:
+        rows.append(
+            (
+                str(a.get("rule_id") or ""),
+                _junit_name(a),
+                "skipped",
+                "info",
+                str(a.get("note") or a.get("message") or ""),
+            )
+        )
+    for d in diagnostics:
+        if d.severity != "error":
+            continue
+        loc = f"{d.file}:{d.line}" if d.file else (d.category or diagnostics_rule_id)
+        rows.append((diagnostics_rule_id, loc, "failure", "error", d.message))
+    rows.sort()
+
+    failures = sum(1 for r in rows if r[2] == "failure")
+    skipped = sum(1 for r in rows if r[2] == "skipped")
+    suite = (
+        f"name={quoteattr(tool_name)} tests={quoteattr(str(len(rows)))} "
+        f"failures={quoteattr(str(failures))} errors={quoteattr('0')} "
+        f"skipped={quoteattr(str(skipped))} time={quoteattr('0')}"
+    )
+    out = ['<?xml version="1.0" encoding="UTF-8"?>', f"<testsuites {suite}>", f"  <testsuite {suite}>"]
+    out.append(
+        "    <properties>"
+        f"<property name={quoteattr('tool')} value={quoteattr(f'{tool_name} {version}')}/>"
+        f"<property name={quoteattr(f'{unit}s_checked')} value={quoteattr(str(int(checked)))}/>"
+        "</properties>"
+    )
+    for classname, name, kind, sev, msg in rows:
+        attrs = f"classname={quoteattr(classname)} name={quoteattr(name)}"
+        if kind == "failure":
+            out.append(f"    <testcase {attrs}>")
+            out.append(
+                f"      <failure message={quoteattr(msg)} type={quoteattr(sev)}>{escape(msg)}</failure>"
+            )
+            out.append("    </testcase>")
+        else:  # skipped
+            out.append(f"    <testcase {attrs}>")
+            out.append(f"      <skipped message={quoteattr(msg)}/>")
+            out.append("    </testcase>")
+    out += ["  </testsuite>", "</testsuites>"]
+    return "\n".join(out) + "\n"

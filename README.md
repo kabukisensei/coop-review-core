@@ -20,7 +20,7 @@ parameterizes the core with its own package name, tool name, and standards file.
 | `coop_review_core.upgrade` | Self-update planning — the only networked part (`build_plan`, `upgrade_command`). |
 | `coop_review_core.config` | The `rules.yml` config layer with unified discovery (`RuleConfig`, `apply_config`, `discover_config`) + standards resolution (`resolve_standards_path`, `standards_info`). |
 | `coop_review_core.cliutils` | Shared CLI helpers (`display_path`, `config_write_path`, `write_extra_report`, `run_upgrade` + `with_upgrade_options`). |
-| `coop_review_core.report` | Shared report chrome — console badges/ANSI + the branded HTML style — plus the machine-JSON envelope, the SARIF 2.1.0 emitter (`to_sarif`), and the single bundled Cooptimize logo (`logo_data_uri`). |
+| `coop_review_core.report` | Shared report chrome — console badges/ANSI + the branded HTML style — plus the machine-JSON envelope, the SARIF 2.1.0 emitter (`to_sarif`), the JUnit XML emitter (`to_junit`, for Azure DevOps), and the single bundled Cooptimize logo (`logo_data_uri`). |
 | `coop_review_core.delta` | Run-to-run envelope comparison (`diff_envelopes` → `EnvelopeDelta`: new / fixed / persisting, keyed on each finding's `fingerprint`) with `delta_text` / `delta_markdown` renderers — "what changed since last review?". |
 | `coop_review_core.errors` | `CoopReviewError`, the common base of every user-facing error core raises. |
 

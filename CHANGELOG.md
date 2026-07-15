@@ -4,6 +4,16 @@ All notable changes to **coop-review-core** are documented here. The format foll
 [Keep a Changelog](https://keepachangelog.com/), and the project uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added
+- `report.to_junit`: a deterministic JUnit XML emitter next to `to_sarif` (issue #30), for
+  Azure DevOps' native `PublishTestResults@2` task (a Tests tab, failure counts, and
+  run-over-run trends — no marketplace extension, unlike SARIF). Same plain-data contract as
+  `to_sarif`: each finding is a `<testcase classname="<rule_id>" name="<file>:<line>">` —
+  error severity → `<failure>`, warning/info → `<skipped>` (advisory); each error diagnostic
+  → `<failure>` under the synthetic diagnostics rule. No timestamps, sorted, XML-escaped via
+  stdlib `xml.sax.saxutils` (no new runtime dep), ASCII-safe, trailing LF — byte-identical
+  across runs and OSes. Both linters gain a `--junit PATH` sink on top (consumer follow-up,
+  after the next core release raises their pins).
 
 ## [0.6.0] - 2026-07-14
 ### Added
