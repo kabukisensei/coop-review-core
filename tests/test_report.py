@@ -390,3 +390,38 @@ def test_to_junit_sorts_deterministically_regardless_of_input_order():
     )
     ids = [tc.get("classname") for tc in ET.fromstring(xml).iter("testcase")]
     assert ids == ["A", "Z"]
+
+def test_to_junit():
+    from coop_review_core.report import to_junit
+    from coop_review_core.diagnostics import Diagnostic
+    findings = [
+        {"rule_id": "R1", "severity": "error", "file": "f1.sql", "line": 10, "message": "msg1"},
+        {"rule_id": "R2", "severity": "warning", "file": "f2.sql", "line": 20, "message": "msg2"},
+        {"rule_id": "R3", "severity": "info", "file": "f3.sql", "line": 30, "message": "msg3"}
+    ]
+    diagnostics = [
+        Diagnostic("error", "category", "f4.sql", 40, "diag_error"),
+        Diagnostic("warning", "category", "f5.sql", 50, "diag_warn")
+    ]
+    agent = [
+        {"rule_id": "R4", "file": "f6.sql", "line": 60, "note": "agent_note"}
+    ]
+    xml = to_junit(tool_name="tool", version="1.0", findings=findings, agent_review=agent, diagnostics=diagnostics, checked=6, unit="files")
+    
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml)
+    
+    assert root.tag == "testsuites"
+    assert root.attrib["failures"] == "2" # R1 error + diagnostic error
+    assert root.attrib["tests"] == "5" # 3 findings + 1 diagnostic + 1 agent
+    
+    suite = root.find("testsuite")
+    assert suite.attrib["failures"] == "2"
+    
+    cases = suite.findall("testcase")
+    assert len(cases) == 5
+    
+    # check if well-formed XML and string contents
+    assert 'message="warning: msg2"' in xml
+    assert '<failure message="msg1" type="error">msg1</failure>' in xml
+    assert 'classname="syntax-error"' in xml

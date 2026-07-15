@@ -5,6 +5,10 @@ All notable changes to **coop-review-core** are documented here. The format foll
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-15
+### Added
+- `to_junit()` emitter in `report.py` for Azure DevOps-native pipeline test results (issue #30)
+
 ## [0.9.0] - 2026-07-15
 ### Added
 - `gitscope.py` helper to resolve changed files since a git ref
