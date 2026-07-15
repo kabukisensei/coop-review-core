@@ -5,6 +5,11 @@ All notable changes to **coop-review-core** are documented here. The format foll
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-15
+### Added
+- Suite summary module (`coop_review_core.suite`): A new library module to aggregate multiple tool envelopes into a single combined artifact (issue #33). 
+  Includes `load_envelopes` for safe, schema-validated loading, `suite_summary` for rolling up metrics across all envelopes, and renderer functions `suite_text` and `suite_html` for console and branded HTML reporting. This enables the agent to provide a unified `coop review --html` summary.
+
 ## [0.7.0] - 2026-07-15
 ### Added
 - Expiring ignores: `rules.yml` ignore entries now accept an `expires: YYYY-MM-DD` key (issue #32).
