@@ -12,6 +12,7 @@ tool name, and standards file:
   severity/params overrides, and the human-readable ``ignore:`` finding list +
   its :func:`~coop_review_core.config.add_ignores` writer) + standards resolution.
 - :mod:`coop_review_core.cliutils`     — the shared CLI helper layer.
+- :mod:`coop_review_core.gitscope`     — local Git repository scope construction.
 - :mod:`coop_review_core.report`       — console/HTML report chrome, the machine-JSON
   envelope, the SARIF 2.1.0 emitter, and the single bundled logo.
 
@@ -25,4 +26,4 @@ from coop_review_core.errors import CoopReviewError
 
 __all__ = ["CoopReviewError"]
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"

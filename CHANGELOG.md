@@ -5,6 +5,10 @@ All notable changes to **coop-review-core** are documented here. The format foll
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-15
+### Added
+- `gitscope.py` helper to resolve changed files since a git ref
+
 ## [0.8.0] - 2026-07-15
 ### Added
 - Suite summary module (`coop_review_core.suite`): A new library module to aggregate multiple tool envelopes into a single combined artifact (issue #33). 

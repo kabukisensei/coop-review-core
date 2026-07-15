@@ -13,8 +13,11 @@ traceback.
 
 from __future__ import annotations
 
-__all__ = ["CoopReviewError"]
+__all__ = ["CoopReviewError", "GitScopeError"]
 
 
 class CoopReviewError(Exception):
     """Base class for every user-facing error raised by coop-review-core."""
+
+class GitScopeError(CoopReviewError):
+    """Raised when git scope resolution fails."""
