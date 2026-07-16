@@ -1,5 +1,4 @@
 import pytest
-import os
 import subprocess
 from coop_review_core.gitscope import get_changed_files
 from coop_review_core.errors import GitScopeError
